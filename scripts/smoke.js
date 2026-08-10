@@ -89,10 +89,34 @@ async function main() {
   check("lineage graph spans the whole tea tree", lineage.nodes.length === 5, String(lineage.nodes.length));
   check("every node in the tea tree is recalled", lineage.nodes.every((n) => n.recalled));
 
+  console.log("\ncommitted attributes");
+  const mangoLot = (await api(`/api/batches/${MANGO}`)).body;
+  check("seeded lot carries an attribute document", mangoLot.attributes?.present === true, JSON.stringify(mangoLot.attributes?.reason));
+  check("attributes match the hash on chain", mangoLot.attributes?.verified === true, mangoLot.attributes?.reason ?? "");
+  check("attributes carry a price", Number(mangoLot.attributes?.attributes?.pricePerUnit) > 0);
+
+  const stored = await post("/api/documents", { grade: "A", note: "smoke document" });
+  check("document store returns a content address", /^0x[0-9a-f]{64}$/.test(stored.body.hash ?? ""), JSON.stringify(stored.body));
+  const fetched = (await api(`/api/documents/${stored.body.hash}`)).body;
+  check("document reads back and verifies", fetched.verified === true && fetched.body.note === "smoke document");
+  check("storing the same document is idempotent", (await post("/api/documents", { note: "smoke document", grade: "A" })).body.hash === stored.body.hash);
+  check("unknown document is a 404", (await api("/api/documents/0x" + "0".repeat(64))).status === 404);
+
+  console.log("\nnotifications");
+  const farmer = (await api("/api/participants")).body.find((p) => p.roles.includes("farmer"));
+  const feed = (await api(`/api/notifications?as=${farmer.address}`)).body;
+  check("participant has a notification feed", Array.isArray(feed) && feed.length > 0, String(feed.length));
+  check("recalls reach everyone", feed.some((n) => n.name.startsWith("Recall")));
+  check("feed marks a participant's own actions", feed.some((n) => n.mine === true));
+  check("notifications need an address", (await api("/api/notifications")).status === 400);
+
   console.log("\nsurfaces");
   check("qr renders as svg", (await api(`/api/qr/${RICE}`)).body.startsWith("<svg"));
-  check("console page served", (await api("/")).status === 200);
-  check("trace page served", (await api("/trace.html?id=1")).status === 200);
+  for (const path of ["/", "/dashboard.html", "/inventory.html", "/search.html", "/lot.html", "/register.html", "/inspect.html", "/notifications.html", "/trace.html?id=1", "/label.html?id=1"]) {
+    check(`page served: ${path}`, (await api(path)).status === 200);
+  }
+  check("compiled stylesheet served", (await api("/css/app.css")).body.includes("@font-face"));
+  check("webfont served locally", (await api("/fonts/manrope-400-latin.woff2")).status === 200);
   check("unknown api route answers json", (await api("/api/nope")).status === 404);
   check("unknown lot answers 404", (await api("/api/batches/9999")).status === 404);
 

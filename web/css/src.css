@@ -1,0 +1,136 @@
+@import "./fonts.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Everything below is the handful of things utilities cannot express: type
+   defaults, the paper grain, focus treatment, and the few component states the
+   markup switches with a class. */
+
+@layer base {
+  body {
+    font-family: "Work Sans", system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Manrope", system-ui, sans-serif;
+  }
+
+  ::selection {
+    background: #b6863b;
+    color: #ffffff;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #cfc6a8;
+    border-radius: 999px;
+    border: 2px solid #f7f4ea;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #b6863b;
+  }
+
+  *:focus-visible {
+    outline: 2px solid #b6863b;
+    outline-offset: 2px;
+  }
+
+  /* Figures line up in columns whether or not they are in a table. */
+  .mono, table tbody tr td {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .grain {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  }
+
+  .nav-link.active {
+    background-color: rgba(230, 211, 168, 0.14);
+    color: #f3ecd8;
+  }
+  .nav-link.active svg {
+    color: #e7d3a8;
+  }
+
+  .action-pill svg {
+    transition: transform 150ms ease;
+  }
+  .action-pill:hover svg {
+    transform: translateY(-1px);
+  }
+
+  .role-btn.role-active {
+    border-width: 2px;
+    border-color: #006947;
+    background-color: rgba(0, 105, 71, 0.08);
+    color: #006947;
+  }
+  .role-btn.role-inactive {
+    border-width: 1px;
+    border-color: #dcd5bf;
+    background-color: #ffffff;
+    color: #5b6058;
+  }
+  .role-btn.role-inactive:hover {
+    border-color: #006947;
+    color: #006947;
+    background-color: #f7f4ea;
+  }
+
+  .tab-btn {
+    border-bottom: 2px solid transparent;
+  }
+  .tab-btn.tab-active {
+    border-bottom-color: #006947;
+    color: #006947;
+  }
+
+  /* Charts and maps size to their container and never force the page wider. */
+  .figure {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+  }
+}
+
+@layer utilities {
+  @keyframes riseIn {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .rise-in {
+    animation: riseIn 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .rise-in-delay {
+    animation: riseIn 700ms cubic-bezier(0.16, 1, 0.3, 1) 90ms both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rise-in,
+    .rise-in-delay {
+      animation: none;
+    }
+  }
+
+  [data-lang="hi"] .font-serif-display {
+    letter-spacing: 0;
+  }
+}

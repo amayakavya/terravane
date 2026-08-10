@@ -4,9 +4,12 @@
 import { ethers } from "ethers";
 import { contracts, provider, readDeployment, wallet } from "./lib/chain.js";
 import { encodeGeohash } from "./lib/geohash.js";
+import { openDatabase } from "../server/db.js";
+import { DocumentStore } from "../server/documents.js";
 
 const deployment = readDeployment();
 const prov = provider();
+const documents = new DocumentStore(openDatabase());
 
 const byName = new Map(deployment.participants.map((p) => [p.name, p]));
 
@@ -31,8 +34,21 @@ async function send(label, promise) {
   return tx;
 }
 
-async function newBatch(farm, input) {
-  await send(`harvest  ${input.produceType} / ${input.variety}  ${input.quantity} ${input.unit}`, farm.registry.createBatch(input));
+/// Commercial attributes go into the document store and the lot commits to their
+/// hash, which is the same path the register form takes in the interface.
+async function newBatch(farm, input, attributes = null) {
+  let payload = input;
+  if (attributes) {
+    const stored = documents.put({
+      ...attributes,
+      produceType: input.produceType,
+      variety: input.variety,
+      registeredBy: farm.address,
+      registeredAt: new Date().toISOString()
+    });
+    payload = { ...input, metadataHash: stored.hash, metadataURI: stored.uri };
+  }
+  await send(`harvest  ${payload.produceType} / ${payload.variety}  ${payload.quantity} ${payload.unit}`, farm.registry.createBatch(payload));
   return Number(await farm.registry.batchCount());
 }
 
@@ -96,7 +112,8 @@ async function main() {
       originLocation: sundar.location,
       metadataURI: "ipfs://agronomy/sundar-basmati-2026",
       metadataHash: hash("sundar-basmati-2026")
-    })
+    }),
+    { pricePerUnit: 62, currency: "INR", grade: "A", organic: true, storage: "Dry, sealed, below 14% moisture", expiresAt: "2027-02-15" }
   );
   await send(`certify  #${rice} India Organic`, board.registry.certifyBatch(rice, "India Organic", BigInt(now + 180 * DAY), "ipfs://certs/io-1", hash("io-1")));
   await send(`inspect  #${rice} grade 94 pass`, fssai.registry.recordInspection(rice, 94, true, "Moisture 12.1%, no broken grain excess", hash("insp-rice-1")));
@@ -142,7 +159,8 @@ async function main() {
       coldChainRequired: true,
       minTempDeciC: 80,
       maxTempDeciC: 130
-    })
+    }),
+    { pricePerUnit: 240, currency: "INR", grade: "A", organic: false, storage: "Reefer, 8 to 13 degrees C", expiresAt: "2026-09-05" }
   );
   await send(`certify  #${mango} Residue Free`, board.registry.certifyBatch(mango, "Residue Free", BigInt(now + 60 * DAY), "ipfs://certs/rf-1", hash("rf-1")));
 
@@ -184,7 +202,8 @@ async function main() {
       originLocation: nilgiri.location,
       metadataURI: "ipfs://agronomy/nilgiri-orthodox-2026",
       metadataHash: hash("nilgiri-orthodox-2026")
-    })
+    }),
+    { pricePerUnit: 410, currency: "INR", grade: "B", organic: true, storage: "Airtight, away from light", expiresAt: "2027-06-30" }
   );
   await send(`split    #${tea} into 2 lots`, nilgiri.registry.splitBatch(tea, [3500n, 2500n]));
   const teaLots = (await nilgiri.registry.getChildren(tea)).map(Number);
@@ -237,7 +256,8 @@ async function main() {
       coldChainRequired: true,
       minTempDeciC: 100,
       maxTempDeciC: 150
-    })
+    }),
+    { pricePerUnit: 28, currency: "INR", grade: "B", organic: false, storage: "Cool, ventilated", expiresAt: "2026-08-24" }
   );
   await send(`telemetry #${tomatoes} 12.4C`, sundar.registry.recordTelemetry(tomatoes, 124, 850, sundar.geohash, hash("tlm-tom-1"), 0));
   await send(`handover #${tomatoes} offered to Coldline (unaccepted)`, sundar.registry.proposeTransfer(tomatoes, coldline.address, sundar.geohash, "Awaiting pickup", hash("open-1")));

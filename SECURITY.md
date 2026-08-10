@@ -21,10 +21,16 @@ into the registry it was constructed with, so there is no reentrancy surface.
 
 ## Known limitations
 
-**Off-chain payloads are unverified.** Agronomy records, certificates, bills of
-lading and sensor payloads are referenced by URI and digest. The contracts cannot
-check that the digest matches anything real, and they do not try. A consumer of
-this data must fetch the payload and hash it themselves.
+**Off-chain payloads are unverified by the contracts.** Agronomy records,
+certificates, bills of lading and sensor payloads are referenced by URI and digest.
+The contracts cannot check that a digest matches anything real, and they do not
+try.
+
+Commercial attributes are the one case this repository closes. They go into a
+content-addressed store, the lot commits to the hash, and every read recomputes it
+and reports whether the two still agree. That proves integrity, not truth: it
+catches a price restated after the fact, and says nothing about whether the price
+was honest when it was written.
 
 **Telemetry is only as honest as its reporter.** The contract decides whether a
 reading counts as an excursion, but it cannot know whether the reading was taken
@@ -47,11 +53,17 @@ whole arrays. They are `view` and free over RPC, but a lot with thousands of sen
 readings will eventually exceed a node's gas cap for `eth_call`. Reading telemetry
 in pages is the fix if that day arrives.
 
-**Development keys.** The server signs with the standard Hardhat mnemonic so the
-console can act as any participant without a browser wallet. Signing refuses
-outright unless the RPC endpoint is loopback, and `TERRAVANE_SIGNING=off` disables
-it entirely. Against any real network this path must be replaced with signatures
-produced on the participant's own device.
+**Development keys, and no authentication.** The server signs with the standard
+Hardhat mnemonic so the console can act as any participant without a browser
+wallet. Signing refuses outright unless the RPC endpoint is loopback, and
+`TERRAVANE_SIGNING=off` disables it entirely.
+
+Signing in is therefore a choice of participant, not an authentication step: there
+is no password, because a password checked by a node that will sign as anyone
+would be theatre. The sign-in page states this rather than hiding it behind a login
+form. Against any real network, both halves have to change together: signatures
+produced on the participant's own device, and an identity proof the node verifies
+rather than accepts.
 
 ## Invariants worth keeping
 

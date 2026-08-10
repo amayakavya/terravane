@@ -14,7 +14,7 @@ export function signingEnabled() {
   }
 }
 
-export function mountActions(app, { deployment, provider, indexer }) {
+export function mountActions(app, { deployment, provider, indexer, documents }) {
   const roster = deployment.participants;
 
   function signerFor(identifier) {
@@ -63,6 +63,27 @@ export function mountActions(app, { deployment, provider, indexer }) {
   app.post("/api/actions/batches", action(async (req) => {
     const { registry, participant } = boundContracts(req.body.as);
     const b = req.body;
+
+    // Commercial attributes are written to the document store first, and the lot
+    // commits to their hash. Restating the price of a lot later means either
+    // producing a document that hashes to the same value, or being caught.
+    let metadataHash = b.metadataHash ?? ethers.ZeroHash;
+    let metadataURI = b.metadataURI ?? "";
+    let attributes = null;
+
+    if (b.attributes && typeof b.attributes === "object") {
+      const stored = documents.put({
+        ...b.attributes,
+        produceType: req.required("produceType"),
+        variety: b.variety ?? "",
+        registeredBy: participant.address,
+        registeredAt: new Date().toISOString()
+      });
+      metadataHash = stored.hash;
+      metadataURI = stored.uri;
+      attributes = stored.body;
+    }
+
     const input = {
       produceType: req.required("produceType"),
       variety: b.variety ?? "",
@@ -71,14 +92,14 @@ export function mountActions(app, { deployment, provider, indexer }) {
       harvestedAt: BigInt(b.harvestedAt ?? 0),
       originGeohash: b.originGeohash ?? participant.geohash ?? "",
       originLocation: b.originLocation ?? participant.location ?? "",
-      metadataHash: b.metadataHash ?? ethers.ZeroHash,
-      metadataURI: b.metadataURI ?? "",
+      metadataHash,
+      metadataURI,
       coldChainRequired: Boolean(b.coldChainRequired),
       minTempDeciC: Math.round((b.minTempC ?? 0) * 10),
       maxTempDeciC: Math.round((b.maxTempC ?? 0) * 10)
     };
     const receipt = await settle(registry.createBatch(input));
-    return { ...receipt, batchId: Number(await registry.batchCount()) };
+    return { ...receipt, batchId: Number(await registry.batchCount()), attributes, metadataHash, metadataURI };
   }));
 
   app.post("/api/actions/batches/:id/transfer", action(async (req) => {

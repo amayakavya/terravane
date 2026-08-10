@@ -4,22 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Trace this produce</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2304241a'/%3E%3Cpath d='M32 12c7 4 10 11 8 20H24c-2-9 1-16 8-20z' fill='%23e7d3a8'/%3E%3Cpath d='M16 42c6-4 11-6 16-6s10 2 16 6l-3 4c-5-3-8-4-13-4s-8 1-13 4z' fill='%23b6863b'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/css/app.css">
 </head>
-<body>
+<body class="bg-background text-on-surface min-h-screen">
 
-<header class="top">
-  <div>
-    <div class="brand">TERRA<span>VANE</span></div>
-    <div class="brand-sub">scan to trace</div>
+<header class="border-b border-outline-variant/70 bg-primary-deep text-gold-soft">
+  <div class="max-w-3xl mx-auto flex items-center justify-between gap-4 px-5 py-4">
+    <div class="flex items-center gap-2.5">
+      <svg width="26" height="26" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M32 6c8 4 12 12 10 22H22c-2-10 2-18 10-22z" fill="#e7d3a8"/>
+        <path d="M14 38c6-4 12-6 18-6s12 2 18 6l-4 4c-5-3-9-4-14-4s-9 1-14 4z" fill="#b6863b"/>
+      </svg>
+      <span class="font-serif-display text-[19px] text-gold-soft" data-i18n="brand"></span>
+    </div>
+    <button id="lang-toggle" type="button" class="font-body-sm text-body-sm text-gold-soft/70 hover:text-gold-soft transition-colors"><span data-lang-label></span></button>
   </div>
-  <div class="chain-pill"><a href="/">operator console</a></div>
 </header>
 
-<div class="trace-shell" id="root">
-  <div class="empty">Loading the record…</div>
-</div>
+<main id="root" class="max-w-3xl mx-auto px-5 py-8 pb-20"></main>
 
-<script type="module" src="/js/trace.js"></script>
+<script type="module" src="/js/page-trace.js"></script>
 </body>
 </html>

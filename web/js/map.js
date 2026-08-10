@@ -1,5 +1,5 @@
 import { OUTLINES } from "./basemap.js";
-import { el } from "./api.js";
+import { el } from "./ui.js";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -75,10 +75,10 @@ function drawLand(svg, project, width, height) {
       const [x, y] = project(ring[i + 1], ring[i]);
       d += `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
     }
-    node(svg, "path", { d: `${d}Z`, fill: "#111714", stroke: "#222c26", "stroke-width": "0.8" });
+    node(svg, "path", { d: `${d}Z`, fill: "#e9e3d0", stroke: "#cfc6a8", "stroke-width": "0.8" });
   }
 
-  node(svg, "rect", { x: 0, y: 0, width, height, fill: "none", stroke: "#1f2723" });
+  node(svg, "rect", { x: 0, y: 0, width, height, fill: "none", stroke: "#dcd5bf" });
 }
 
 /// Greedy label placement. Five participants around Delhi land within a few pixels
@@ -89,7 +89,7 @@ function makeLabeller(svg, width, height) {
 
   const overlaps = (a, b) => !(a.x2 < b.x1 || b.x2 < a.x1 || a.y2 < b.y1 || b.y2 < a.y1);
 
-  return function label(x, y, text, { size = 10, fill = "#c7d2ca", gap = 6 } = {}) {
+  return function label(x, y, text, { size = 10, fill = "#1c2420", gap = 6 } = {}) {
     const w = text.length * size * 0.55;
     const h = size + 2;
 
@@ -150,14 +150,14 @@ function scaleBar(svg, project, width, height) {
 
   const y = height - 16;
   const x = 14;
-  node(svg, "line", { x1: x, x2: x + barWidth, y1: y, y2: y, stroke: "#5d6a61", "stroke-width": "1.5" });
-  node(svg, "line", { x1: x, x2: x, y1: y - 3, y2: y + 3, stroke: "#5d6a61" });
-  node(svg, "line", { x1: x + barWidth, x2: x + barWidth, y1: y - 3, y2: y + 3, stroke: "#5d6a61" });
+  node(svg, "line", { x1: x, x2: x + barWidth, y1: y, y2: y, stroke: "#6e7a72", "stroke-width": "1.5" });
+  node(svg, "line", { x1: x, x2: x, y1: y - 3, y2: y + 3, stroke: "#6e7a72" });
+  node(svg, "line", { x1: x + barWidth, x2: x + barWidth, y1: y - 3, y2: y + 3, stroke: "#6e7a72" });
 
   const label = node(svg, "text", {
     x: x + barWidth + 6,
     y: y + 3,
-    fill: "#5d6a61",
+    fill: "#6e7a72",
     "font-size": "9",
     "font-family": "ui-monospace, monospace"
   });
@@ -165,11 +165,11 @@ function scaleBar(svg, project, width, height) {
 }
 
 const MARKER = {
-  origin: { r: 5, fill: "#6ee7a0", stroke: "#0b0e0c" },
-  handover: { r: 4, fill: "#7fb3f0", stroke: "#0b0e0c" },
-  current: { r: 6, fill: "#e6ece7", stroke: "#0b0e0c" },
-  reading: { r: 2.2, fill: "#3f6f8f", stroke: "none" },
-  excursion: { r: 3.6, fill: "#f0736a", stroke: "#0b0e0c" }
+  origin: { r: 5, fill: "#006947", stroke: "#ffffff" },
+  handover: { r: 4, fill: "#43664d", stroke: "#ffffff" },
+  current: { r: 6, fill: "#04241a", stroke: "#ffffff" },
+  reading: { r: 2.2, fill: "#8ba793", stroke: "none" },
+  excursion: { r: 3.6, fill: "#a13a2c", stroke: "#ffffff" }
 };
 
 /**
@@ -186,7 +186,7 @@ export function journeyMap(stops, readings = [], { width = 640, height = 380, mi
 
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.setAttribute("class", "chart map");
+  svg.setAttribute("class", "figure map rounded-lg");
 
   const all = [...located, ...readings.filter((r) => Number.isFinite(r.lat))];
   // A 200 km hop would otherwise fill the frame with empty land. Holding a floor
@@ -209,7 +209,7 @@ export function journeyMap(stops, readings = [], { width = 640, height = 380, mi
       const [x, y] = project(stop.lat, stop.lon);
       d += `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
     });
-    node(svg, "path", { d, fill: "none", stroke: "#6ee7a0", "stroke-width": "1.6", "stroke-dasharray": "5 4", opacity: "0.75" });
+    node(svg, "path", { d, fill: "none", stroke: "#006947", "stroke-width": "1.6", "stroke-dasharray": "5 4", opacity: "0.75" });
   }
 
   const label = makeLabeller(svg, width, height);
@@ -239,30 +239,30 @@ export function networkMap(participants, { width = 960, height = 470 } = {}) {
 
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.setAttribute("class", "chart map");
+  svg.setAttribute("class", "figure map rounded-lg");
 
   const project = fit(located, width, height, 34, 3);
   drawLand(svg, project, width, height);
 
   const ROLE_COLOUR = {
-    farmer: "#6ee7a0",
-    processor: "#e8b95a",
-    distributor: "#7fb3f0",
-    retailer: "#c58ff0",
-    certifier: "#5d6a61",
-    inspector: "#5d6a61",
-    oracle: "#5d6a61",
-    admin: "#5d6a61"
+    farmer: "#006947",
+    processor: "#b6863b",
+    distributor: "#43664d",
+    retailer: "#7a5ea8",
+    certifier: "#6e7a72",
+    inspector: "#6e7a72",
+    oracle: "#6e7a72",
+    admin: "#6e7a72"
   };
 
   for (const p of located) {
     const [x, y] = project(p.lat, p.lon);
     const primary = p.roles.find((r) => ROLE_COLOUR[r]) ?? "admin";
-    const colour = p.active ? ROLE_COLOUR[primary] : "#5a2a26";
+    const colour = p.active ? ROLE_COLOUR[primary] : "#a13a2c";
     const r = 3.5 + Math.min(p.holding, 6) * 0.9;
 
     node(svg, "circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: r + 4, fill: colour, opacity: "0.12" });
-    node(svg, "circle", { cx: x.toFixed(1), cy: y.toFixed(1), r, fill: colour, stroke: "#0b0e0c", "stroke-width": "1.2" });
+    node(svg, "circle", { cx: x.toFixed(1), cy: y.toFixed(1), r, fill: colour, stroke: "#ffffff", "stroke-width": "1.2" });
   }
 
   // Labels come after every marker so none is drawn over, and the busiest nodes
@@ -273,10 +273,10 @@ export function networkMap(participants, { width = 960, height = 470 } = {}) {
   for (const p of byImportance) {
     const [x, y] = project(p.lat, p.lon);
     const r = 3.5 + Math.min(p.holding, 6) * 0.9;
-    if (!label(x, y, p.name, { size: 9.5, fill: "#8d9a91", gap: r + 5 })) dropped++;
+    if (!label(x, y, p.name, { size: 9.5, fill: "#5b6058", gap: r + 5 })) dropped++;
   }
   if (dropped) {
-    const note = node(svg, "text", { x: width - 14, y: 20, fill: "#5d6a61", "font-size": "9", "text-anchor": "end" });
+    const note = node(svg, "text", { x: width - 14, y: 20, fill: "#6e7a72", "font-size": "9", "text-anchor": "end" });
     note.textContent = `${dropped} label${dropped === 1 ? "" : "s"} hidden by crowding`;
   }
 

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inspect produce</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2304241a'/%3E%3Cpath d='M32 12c7 4 10 11 8 20H24c-2-9 1-16 8-20z' fill='%23e7d3a8'/%3E%3Cpath d='M16 42c6-4 11-6 16-6s10 2 16 6l-3 4c-5-3-8-4-13-4s-8 1-13 4z' fill='%23b6863b'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="bg-background text-on-surface h-screen flex overflow-hidden">
+
+<aside id="sidebar-root" class="hidden md:flex w-64 bg-primary-deep text-gold-soft/80 flex-col shrink-0 relative"></aside>
+
+<div class="flex-1 flex flex-col overflow-hidden min-w-0">
+  <header id="topbar-root" class="flex items-center justify-between gap-4 px-5 lg:px-10 py-4 lg:py-5 border-b border-outline-variant/70 bg-surface-bright shrink-0"></header>
+  <nav id="mobile-nav" class="md:hidden flex gap-1 overflow-x-auto border-b border-outline-variant/70 bg-surface-bright px-3 py-2 shrink-0"></nav>
+  <main id="main" class="flex-1 overflow-y-auto px-5 lg:px-10 py-6 lg:py-8"></main>
+</div>
+
+<script type="module" src="/js/page-inspect.js"></script>
+</body>
+</html>

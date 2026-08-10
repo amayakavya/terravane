@@ -6,6 +6,7 @@ import { decodeGeohash } from "../scripts/lib/geohash.js";
 import { getMeta, openDatabase } from "./db.js";
 import { Indexer } from "./indexer.js";
 import { mountActions, signingEnabled } from "./actions.js";
+import { DocumentStore, mountDocuments } from "./documents.js";
 
 const PORT = Number(process.env.PORT ?? 4300);
 const deployment = readDeployment();
@@ -13,6 +14,7 @@ const prov = provider();
 const db = openDatabase();
 const { registry } = contracts(prov, deployment);
 
+const documents = new DocumentStore(db);
 const indexer = new Indexer({ db, provider: prov, deployment });
 
 const app = express();
@@ -115,6 +117,7 @@ async function dossier(id) {
 
   return {
     batch: shapeBatch(row),
+    attributes: documents.resolve(row.metadata_uri, row.metadata_hash),
     handovers: handovers.map((h) => ({
       from: who(h.from),
       to: who(h.to),
@@ -348,6 +351,44 @@ app.get("/api/events", (req, res) => {
   res.json(rows.map((e) => ({ ...e, actor: who(e.actor), args: JSON.parse(e.args) })));
 });
 
+/// What one participant needs to be told: anything they did, anything done to a
+/// lot they hold or grew, and every recall regardless of who it touches.
+app.get("/api/notifications", (req, res) => {
+  const address = String(req.query.as ?? "").toLowerCase();
+  if (!address) return res.status(400).json({ error: "an address is required" });
+  const limit = Math.min(Number(req.query.limit ?? 40), 200);
+
+  const rows = db
+    .prepare(`
+      SELECT e.* FROM events e
+      LEFT JOIN batches b ON b.id = e.batch_id
+      WHERE LOWER(e.actor) = @address
+         OR LOWER(b.custodian) = @address
+         OR LOWER(b.origin_farm) = @address
+         OR LOWER(b.pending_custodian) = @address
+         OR e.name IN ('RecallInitiated', 'RecallPropagated')
+      ORDER BY e.block DESC, e.log_index DESC
+      LIMIT ${limit}
+    `)
+    .all({ address });
+
+  res.json(
+    rows.map((e) => {
+      const args = JSON.parse(e.args);
+      return {
+        name: e.name,
+        batchId: e.batch_id,
+        actor: who(e.actor),
+        at: e.ts,
+        txHash: e.tx_hash,
+        args,
+        // Something addressed to you reads differently from something you did.
+        mine: String(e.actor ?? "").toLowerCase() === address
+      };
+    })
+  );
+});
+
 /// The consumer answer. Deliberately narrow: what was it, where did it come
 /// from, who touched it, and is there any reason not to eat it.
 app.get("/api/trace/:id", async (req, res) => {
@@ -386,7 +427,10 @@ app.get("/api/trace/:id", async (req, res) => {
   if (batch.recalled) warnings.push({ level: "critical", text: `Recalled: ${data.recall?.reason ?? "no reason recorded"}` });
   if (batch.coldChainBreached) warnings.push({ level: "warning", text: "Cold chain was broken in transit" });
   if (!batch.custodyIntact) warnings.push({ level: "warning", text: "Custody record has an unsettled handover" });
-  if (batch.counts.failedInspections > 0) warnings.push({ level: "warning", text: `${batch.counts.failedInspections} failed inspection(s)` });
+  if (batch.counts.failedInspections > 0) {
+    const n = batch.counts.failedInspections;
+    warnings.push({ level: "warning", text: n === 1 ? "One inspection was failed" : `${n} inspections were failed` });
+  }
   if (batch.stage === 6) warnings.push({ level: "critical", text: "This lot was destroyed and must not be on sale" });
 
   res.json({
@@ -394,6 +438,7 @@ app.get("/api/trace/:id", async (req, res) => {
     verdict: warnings.some((w) => w.level === "critical") ? "unsafe" : warnings.length ? "caution" : "verified",
     warnings,
     batch,
+    attributes: data.attributes,
     journey,
     journeyHandovers: data.handovers,
     certifications: [...data.certifications, ...data.farmCertifications].filter((c) => c.active),
@@ -414,7 +459,8 @@ app.get("/api/qr/:id", async (req, res) => {
 // Write API and static UI
 // ---------------------------------------------------------------------------
 
-mountActions(app, { deployment, provider: prov, indexer, db });
+mountDocuments(app, documents);
+mountActions(app, { deployment, provider: prov, indexer, db, documents });
 
 app.use("/api", (_req, res) => res.status(404).json({ error: "no such endpoint" }));
 

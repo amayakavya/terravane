@@ -6,17 +6,17 @@
 <title>Pack label</title>
 <link rel="stylesheet" href="/css/app.css">
 </head>
-<body class="label-page">
+<body class="bg-surface-container-low text-on-surface min-h-screen print:bg-white">
 
-<div class="label-toolbar">
-  <a href="/">Back to console</a>
-  <button id="print" class="primary">Print</button>
+<div class="print:hidden border-b border-outline-variant bg-surface-bright">
+  <div class="max-w-3xl mx-auto flex items-center justify-between gap-4 px-5 py-3.5">
+    <a href="/dashboard.html" class="font-body-sm text-body-sm text-primary hover:underline" data-i18n="common.back"></a>
+    <button id="print" type="button" class="rounded-lg bg-primary text-on-primary px-4 py-2 font-body-sm text-body-sm" data-i18n="label.print"></button>
+  </div>
 </div>
 
-<div id="root">
-  <div class="empty">Loading the lot.</div>
-</div>
+<main id="root" class="max-w-3xl mx-auto px-5 py-8 print:p-0 print:max-w-none"></main>
 
-<script type="module" src="/js/label.js"></script>
+<script type="module" src="/js/page-label.js"></script>
 </body>
 </html>

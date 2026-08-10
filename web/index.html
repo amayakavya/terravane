@@ -3,79 +3,49 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Terravane provenance console</title>
+<title>Terravane</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2304241a'/%3E%3Cpath d='M32 12c7 4 10 11 8 20H24c-2-9 1-16 8-20z' fill='%23e7d3a8'/%3E%3Cpath d='M16 42c6-4 11-6 16-6s10 2 16 6l-3 4c-5-3-8-4-13-4s-8 1-13 4z' fill='%23b6863b'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/css/app.css">
 </head>
-<body>
+<body class="bg-background text-on-surface min-h-screen">
 
-<header class="top">
-  <div>
-    <div class="brand">TERRA<span>VANE</span></div>
-    <div class="brand-sub">agricultural produce provenance ledger</div>
-  </div>
-  <div class="chain-pill" id="chain"><span class="dim">connecting…</span></div>
-</header>
+<div class="min-h-screen grid lg:grid-cols-[1.05fr_1fr]">
 
-<div class="shell">
-  <main>
-    <div class="stat-row" id="stats"></div>
+  <!-- The pitch, and the honest note about what identity means here. -->
+  <section class="relative bg-primary-deep text-gold-soft px-8 py-12 lg:px-16 lg:py-16 flex flex-col justify-between overflow-hidden">
+    <div class="absolute inset-0 grain pointer-events-none"></div>
 
-    <section class="panel">
-      <h2>Lots on the ledger <span class="count" id="batch-count"></span></h2>
-      <div class="controls">
-        <input type="search" id="q" placeholder="Search produce, variety, origin or lot id">
-        <select id="stage">
-          <option value="">Any stage</option>
-        </select>
-        <button class="chip" data-flag="">All</button>
-        <button class="chip" data-flag="clean">Clean</button>
-        <button class="chip" data-flag="recalled">Recalled</button>
-        <button class="chip" data-flag="breached">Cold chain</button>
-        <button class="chip" data-flag="open">In flight</button>
-        <button id="new-batch">New harvest</button>
-      </div>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th style="width:56px">Lot</th>
-              <th>Produce</th>
-              <th class="right">Quantity</th>
-              <th>Stage</th>
-              <th>Custodian</th>
-              <th>Flags</th>
-            </tr>
-          </thead>
-          <tbody id="rows"></tbody>
-        </table>
-      </div>
-      <div class="keys">
-        <span><kbd>/</kbd>search</span>
-        <span><kbd>j</kbd><kbd>k</kbd>move through lots</span>
-        <span><kbd>1</kbd>to<kbd>6</kbd>switch tab</span>
-        <span><kbd>esc</kbd>clear</span>
-      </div>
-    </section>
+    <div class="relative flex items-center gap-3">
+      <svg width="36" height="36" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M32 6c8 4 12 12 10 22H22c-2-10 2-18 10-22z" fill="#e7d3a8"/>
+        <path d="M14 38c6-4 12-6 18-6s12 2 18 6l-4 4c-5-3-9-4-14-4s-9 1-14 4z" fill="#b6863b"/>
+        <rect x="24" y="18" width="14" height="12" rx="1" fill="#f3ecd8"/>
+        <rect x="27" y="21" width="6" height="5" fill="#04241a"/>
+        <circle cx="27" cy="34" r="5" fill="#f3ecd8"/><circle cx="27" cy="34" r="2" fill="#04241a"/>
+        <circle cx="37" cy="34" r="4" fill="#f3ecd8"/><circle cx="37" cy="34" r="1.6" fill="#04241a"/>
+      </svg>
+      <span class="font-serif-display text-[24px] tracking-tight text-gold-soft" data-i18n="brand"></span>
+    </div>
 
-    <section class="panel" id="detail">
-      <h2>Lot dossier</h2>
-      <div class="empty">Select a lot to open its provenance record.</div>
-    </section>
-  </main>
+    <div class="relative max-w-lg rise-in">
+      <h1 class="font-serif-display text-[40px] lg:text-[52px] leading-[1.08] text-white mb-5" data-i18n="login.title"></h1>
+      <p class="font-body-lg text-body-lg text-gold-soft/75" data-i18n="login.subtitle"></p>
 
-  <aside>
-    <section class="panel">
-      <h2>Participants <span class="count" id="participant-count"></span></h2>
-      <div class="scroll" id="participants"></div>
-    </section>
+      <div class="mt-10 grid gap-4" id="chain-facts"></div>
+    </div>
 
-    <section class="panel">
-      <h2>Ledger activity <span class="count" id="event-count"></span></h2>
-      <ul class="feed scroll" id="feed"></ul>
-    </section>
-  </aside>
+    <div class="relative font-label-sm text-[11px] tracking-widest uppercase text-gold-soft/40">
+      <span data-i18n="login.secure"></span>
+    </div>
+  </section>
+
+  <!-- Sign in -->
+  <section class="px-6 py-12 lg:px-16 lg:py-16 flex items-center">
+    <div class="w-full max-w-md mx-auto" id="signin-root"></div>
+  </section>
+
 </div>
 
-<script type="module" src="/js/console.js"></script>
+<script type="module" src="/js/page-signin.js"></script>
 </body>
 </html>

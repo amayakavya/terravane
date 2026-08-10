@@ -12,13 +12,19 @@
     "deploy": "node scripts/deploy.js",
     "seed": "node scripts/seed.js",
     "server": "node server/index.js",
-    "stack": "node scripts/stack.js",
+    "stack": "npm run css && node scripts/stack.js",
     "smoke": "node scripts/smoke.js",
-    "basemap": "node scripts/build-basemap.js"
+    "basemap": "node scripts/build-basemap.js",
+    "css": "tailwindcss -c tailwind.config.cjs -i web/css/src.css -o web/css/app.css --minify",
+    "assets": "node scripts/build-assets.js",
+    "build": "npm run compile && npm run css",
+    "checkui": "node scripts/checkui.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.0",
-    "hardhat": "^3.0.0"
+    "@tailwindcss/forms": "^0.5.11",
+    "hardhat": "^3.0.0",
+    "tailwindcss": "^3.4.19"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
