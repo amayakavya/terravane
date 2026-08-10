@@ -116,7 +116,10 @@ export function lotFlags(batch) {
   if (batch.stage === 6) out.push([t("stage.destroyed"), "bad"]);
   if (batch.coldChainBreached) out.push([t("flag.breached"), "warn"]);
   if (!batch.custodyIntact) out.push([t("flag.custodyGap"), "warn"]);
-  if (batch.counts?.failedInspections > 0) out.push([`${batch.counts.failedInspections} ${t("lot.inspections")}`, "warn"]);
+  if (batch.counts?.failedInspections > 0) {
+    const n = batch.counts.failedInspections;
+    out.push([`${n} ${t(n === 1 ? "flag.failedCheck" : "flag.failedChecks")}`, "warn"]);
+  }
   if (Number(batch.quantity) === 0 && batch.children?.length) out.push([t("flag.consumed"), "info"]);
   if (batch.counts?.activeCertifications > 0) out.push([`${batch.counts.activeCertifications} ${t("flag.certified")}`, "good"]);
   return out.map(([label, tone]) => badge(label, tone));

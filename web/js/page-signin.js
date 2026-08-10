@@ -52,7 +52,7 @@ async function paintChainFacts() {
     const facts = [
       [t("dash.onLedger"), stats.batches ?? 0],
       [t("chain.indexed"), health.indexedBlock],
-      [t("signin.pickParticipant"), stats.participants ?? 0]
+      [t("signin.participants"), stats.participants ?? 0]
     ];
     mount(host, 
       el("div", { class: "flex flex-wrap gap-3" },

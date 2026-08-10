@@ -36,7 +36,7 @@ async function start() {
       el("div", { class: "grid gap-6 xl:grid-cols-[1fr_380px] items-start" }, [
         el("div", { class: "grid gap-6" }, [
           card([cardHeader(t("insp.viewFlagged")), lotTable(queue, { onEmpty: t("common.none"), dense: true })], "rise-in"),
-          card([cardHeader(t("inspect.viewInspected")), lotTable(uninspected, { onEmpty: t("common.none"), dense: true })], "rise-in-delay")
+          card([cardHeader(t("insp.awaiting")), lotTable(uninspected, { onEmpty: t("common.none"), dense: true })], "rise-in-delay")
         ]),
         inspectForm()
       ])
