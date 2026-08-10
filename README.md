@@ -1,6 +1,6 @@
 # Terravane
 
-[![ci](https://github.com/DarkKnight091/terravane/actions/workflows/ci.yml/badge.svg)](https://github.com/DarkKnight091/terravane/actions/workflows/ci.yml)
+[![ci](https://github.com/amayakavya/terravane/actions/workflows/ci.yml/badge.svg)](https://github.com/amayakavya/terravane/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-6ee7a0)](LICENSE)
 
 A permissioned provenance ledger for agricultural produce. A lot is minted at the
