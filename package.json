@@ -1,0 +1,31 @@
+{
+  "name": "terravane",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Permissioned provenance ledger for agricultural produce: custody, cold chain, certification and recall on chain",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test mocha",
+    "size": "hardhat compile && node scripts/checksize.js",
+    "chain": "hardhat node",
+    "deploy": "node scripts/deploy.js",
+    "seed": "node scripts/seed.js",
+    "server": "node server/index.js",
+    "stack": "node scripts/stack.js"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.0",
+    "hardhat": "^3.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "ethers": "^6.13.5",
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}

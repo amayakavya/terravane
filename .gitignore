@@ -1,0 +1,8 @@
+node_modules/
+artifacts/
+cache/
+data/
+deployments/
+types/
+.DS_Store
+*.log

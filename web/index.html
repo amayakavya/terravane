@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terravane provenance console</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <div class="brand">TERRA<span>VANE</span></div>
+    <div class="brand-sub">agricultural produce provenance ledger</div>
+  </div>
+  <div class="chain-pill" id="chain"><span class="dim">connecting…</span></div>
+</header>
+
+<div class="shell">
+  <main>
+    <div class="stat-row" id="stats"></div>
+
+    <section class="panel">
+      <h2>Lots on the ledger <span class="count" id="batch-count"></span></h2>
+      <div class="controls">
+        <input type="search" id="q" placeholder="Search produce, variety, origin or lot id">
+        <select id="stage">
+          <option value="">Any stage</option>
+        </select>
+        <button class="chip" data-flag="">All</button>
+        <button class="chip" data-flag="clean">Clean</button>
+        <button class="chip" data-flag="recalled">Recalled</button>
+        <button class="chip" data-flag="breached">Cold chain</button>
+        <button class="chip" data-flag="open">In flight</button>
+        <button id="new-batch">New harvest</button>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:56px">Lot</th>
+              <th>Produce</th>
+              <th class="right">Quantity</th>
+              <th>Stage</th>
+              <th>Custodian</th>
+              <th>Flags</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" id="detail">
+      <h2>Lot dossier</h2>
+      <div class="empty">Select a lot to open its provenance record.</div>
+    </section>
+  </main>
+
+  <aside>
+    <section class="panel">
+      <h2>Participants <span class="count" id="participant-count"></span></h2>
+      <div class="scroll" id="participants"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Ledger activity <span class="count" id="event-count"></span></h2>
+      <ul class="feed scroll" id="feed"></ul>
+    </section>
+  </aside>
+</div>
+
+<script type="module" src="/js/console.js"></script>
+</body>
+</html>

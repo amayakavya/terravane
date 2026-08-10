@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run compile
+      - run: node scripts/checksize.js
+      - run: npm test
+
+  stack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run compile
+
+      - name: Start a chain, deploy and seed
+        run: |
+          npx hardhat node > /tmp/chain.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -X POST -H 'Content-Type: application/json' \
+              --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+              http://127.0.0.1:8545 > /dev/null && break
+            sleep 1
+          done
+          node scripts/deploy.js
+          TERRAVANE_QUIET=1 node scripts/seed.js
+
+      - name: Serve and exercise the API
+        run: |
+          node server/index.js > /tmp/server.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4300/api/health > /dev/null && break
+            sleep 1
+          done
+          node scripts/smoke.js
