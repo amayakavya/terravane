@@ -28,7 +28,7 @@ wipe the previous index and deployment before starting.
 ```bash
 npm test             # 58 contract tests
 npm run size         # contract sizes against the 24,576 byte deployment limit
-node scripts/smoke.js  # 31 end to end checks against a running stack
+npm run smoke        # 31 end to end checks against a running stack
 ```
 
 ## The problem this shape solves
@@ -148,21 +148,43 @@ own device.
 ## The interface
 
 The operator console carries fleet statistics, a filterable lot table and a dossier
-with five tabs. Lots deep-link as `#lot=5&tab=lineage`.
+with six tabs. With nothing selected it shows the network instead of an
+instruction: every enrolled participant on the map, sized by how much it is
+holding. Lots deep-link as `#lot=5&tab=lineage`, and the keyboard drives it:
+`/` to search, `j` and `k` through the lots, `1` to `6` across the tabs, `esc` to
+clear.
 
-![Lot dossier](docs/dossier.png)
+![Operator console with the participant map](docs/console.png)
+
+The route tab puts a lot's custody trail on a map, with distance travelled, days
+since harvest, and every sensor reading in place. Excursions are the red points.
+
+![Route of a lot with a cold chain breach](docs/route.png)
 
 The lineage tab draws the transformation graph. Below, a tea harvest that failed a
 residue test, recalled at the root and propagated through two generations.
 
 ![Lineage after a recall](docs/lineage.png)
 
+Before signing a recall, the actions panel names every lot the recall will reach,
+worked out from the index and re-proved by the contract when it is submitted.
+
 The consumer page answers one question in one screen: is there any reason not to
-eat this. Verdict, then the warnings behind it, then provenance, certifications in
-force, the journey, the temperature record with excursions marked, and how the lot
-was made up from its parents.
+eat this. Verdict, then the warnings behind it, then provenance, where it
+travelled, certifications in force, the journey, the temperature record with
+excursions marked, and how the lot was made up from its parents.
 
 <img src="docs/trace.png" alt="Consumer trace page" width="440">
+
+There is also a printable pack label at `/label.html?id=5`: lot number, origin,
+harvest date, storage window, certifications and the QR code that leads back to
+the full record. It prints on white and carries nothing that needs a network to
+read.
+
+![Printable pack label](docs/label.png)
+
+The maps are drawn from a simplified Natural Earth outline shipped as a module, so
+they work with no tile server and no network. `npm run basemap` regenerates it.
 
 ## Seeded data
 
@@ -180,9 +202,9 @@ is a placeholder:
 ```
 contracts/   AccessRegistry, ProduceRegistry, IAccessRegistry
 test/        58 mocha tests
-scripts/     deploy, seed, stack runner, smoke suite, size gate, shared helpers
+scripts/     deploy, seed, stack runner, smoke suite, size gate, basemap build
 server/      SQLite schema, event indexer, read API, write actions
-web/         operator console and consumer trace, vanilla ES modules, no build step
+web/         console, consumer trace and pack label; vanilla ES modules, no build step
 ```
 
 ## Environment
@@ -201,6 +223,12 @@ The contracts are unaudited, off-chain payloads are referenced by digest but nev
 verified on chain, and telemetry is only as honest as the gateway that reports it.
 [SECURITY.md](SECURITY.md) sets out the trust model, the known limitations and the
 invariants that count as security bugs if they ever break.
+
+## Credits
+
+Map outlines come from [Natural Earth](https://www.naturalearthdata.com/) 1:110m
+Admin 0 Countries, which is in the public domain. They are simplified and
+committed as `web/js/basemap.js` by `scripts/build-basemap.js`.
 
 ## License
 

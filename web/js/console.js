@@ -1,4 +1,5 @@
 import { STAGES, ago, clear, drawLineage, el, flags, get, plural, post, qty, temperatureChart, when } from "./api.js";
+import { custodyStops, journeyMap, networkMap, routeDistance } from "./map.js";
 
 const state = {
   filter: { q: "", stage: "", flag: "" },
@@ -135,7 +136,9 @@ async function loadFeed() {
   }
 }
 
-async function select(id) {
+/// `scroll` is off when restoring from a URL: arriving at a shared link should
+/// show the whole console, not fling the page down to the dossier.
+async function select(id, { scroll = true } = {}) {
   state.selected = id;
   state.tab = "overview";
   syncHash();
@@ -143,7 +146,7 @@ async function select(id) {
   await loadBatches();
   state.dossier = await get(`/api/batches/${id}`);
   renderDetail();
-  $("detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  if (scroll) $("detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function syncHash() {
@@ -156,7 +159,13 @@ function renderDetail() {
   const d = state.dossier;
   const panel = clear($("detail"));
   if (!d) {
-    panel.append(el("h2", { text: "Lot dossier" }), el("div", { class: "empty", text: "Select a lot." }));
+    panel.append(
+      el("h2", {}, ["Where the chain is", el("span", { class: "count", text: `${state.participants.length} nodes` })]),
+      el("div", { class: "panel-body" }, [
+        networkMap(state.participants),
+        el("div", { class: "faint", style: "font-size:12px;margin-top:10px", text: "Every enrolled participant, sized by how many lots it is holding. Select a lot above to trace its route." })
+      ])
+    );
     return;
   }
   const b = d.batch;
@@ -185,7 +194,7 @@ function renderDetail() {
       el("span", { class: "mark", text: verdict }),
       el("span", { class: "why", text: why })
     ]),
-    el("div", { class: "tabs" }, ["overview", "timeline", "lineage", "cold chain", "actions"].map((name) =>
+    el("div", { class: "tabs" }, ["overview", "route", "timeline", "lineage", "cold chain", "actions"].map((name) =>
       el("button", {
         class: `tab ${state.tab === name ? "on" : ""}`,
         text: name,
@@ -201,6 +210,7 @@ function renderDetail() {
 
   const body = $("tab-body");
   if (state.tab === "overview") renderOverview(body, d);
+  if (state.tab === "route") renderRoute(body, d);
   if (state.tab === "timeline") renderTimeline(body, d);
   if (state.tab === "lineage") renderLineage(body, b.id);
   if (state.tab === "cold chain") renderColdChain(body, d);
@@ -255,9 +265,33 @@ function renderOverview(body, d) {
       qr,
       el("div", {}, [
         el("div", { class: "dim", text: "Pack label" }),
-        el("div", { class: "faint", style: "font-size:12px", text: "Scanning this opens the consumer trace for the lot." })
+        el("div", { class: "faint", style: "font-size:12px", text: "Scanning this opens the consumer trace for the lot." }),
+        el("div", { style: "margin-top:8px;display:flex;gap:12px" }, [
+          el("a", { href: `/label.html?id=${b.id}`, target: "_blank", text: "Printable label" }),
+          el("a", { href: `/trace.html?id=${b.id}`, target: "_blank", text: "Consumer view" })
+        ])
       ])
     ])
+  );
+}
+
+function renderRoute(body, d) {
+  const stops = custodyStops(d);
+  const readings = d.telemetry.filter((t) => t.position).map((t) => ({ ...t.position, excursion: t.excursion }));
+  const km = routeDistance(stops);
+  const elapsed = d.batch.harvestedAt ? (Date.now() / 1000 - d.batch.harvestedAt) / 86400 : 0;
+
+  body.append(
+    el("div", { class: "map-facts" }, [
+      el("div", {}, [el("div", { class: "k", text: "Distance travelled" }), el("div", { class: "v mono", text: `${Math.round(km).toLocaleString()} km` })]),
+      el("div", {}, [el("div", { class: "k", text: "Custody points" }), el("div", { class: "v mono", text: String(stops.length) })]),
+      el("div", {}, [el("div", { class: "k", text: "Days since harvest" }), el("div", { class: "v mono", text: elapsed.toFixed(1) })]),
+      el("div", {}, [el("div", { class: "k", text: "Positions logged" }), el("div", { class: "v mono", text: String(readings.length) })])
+    ]),
+    journeyMap(stops, readings),
+    el("div", { class: "faint", style: "font-size:12px;margin-top:10px" },
+      "Positions are decoded from the geohashes written on chain at each handover and sensor reading. Red points sit outside the lot's permitted temperature band."
+    )
   );
 }
 
@@ -402,11 +436,30 @@ function renderActions(body, d) {
   const fieldsBox = el("div", { class: "form-grid", id: "action-fields" });
   const notice = el("div", { id: "action-notice" });
 
-  const renderFields = () => {
+  const impact = el("div", { id: "action-impact" });
+
+  const renderFields = async () => {
     const action = ACTIONS.find((a) => a.id === chooser.value);
     clear(fieldsBox).append(
       ...action.fields.map((f) => el("div", { class: "field" }, [el("label", { text: f.label }), fieldInput(f)]))
     );
+
+    // A recall is irreversible and reaches further than the lot in front of you.
+    // Show the operator exactly what they are about to freeze, before they sign.
+    clear(impact);
+    if (action.id !== "recall") return;
+    try {
+      const { descendants } = await get(`/api/batches/${d.batch.id}/descendants`);
+      impact.append(
+        el("div", { class: "notice warn" },
+          descendants.length
+            ? `This will freeze lot #${d.batch.id} and ${plural(descendants.length, "lot derived from it", "lots derived from it")}: ${descendants.map((n) => `#${n}`).join(", ")}. The contract re-proves the lineage of each one before marking it.`
+            : `This will freeze lot #${d.batch.id}. Nothing has been derived from it, so there is nothing further to reach.`
+        )
+      );
+    } catch (err) {
+      impact.append(el("div", { class: "notice bad", text: `Could not work out the recall reach: ${err.message}` }));
+    }
   };
   chooser.addEventListener("change", renderFields);
 
@@ -448,6 +501,7 @@ function renderActions(body, d) {
     ]),
     el("div", { style: "height:10px" }),
     fieldsBox,
+    impact,
     el("div", { style: "margin-top:14px" }, submit),
     notice
   );
@@ -514,9 +568,63 @@ function renderCreateForm() {
 
 // ---------------------------------------------------------------- loop
 
-async function refresh() {
-  await Promise.all([loadHealth(), loadStats(), loadBatches(), loadParticipants(), loadFeed()]);
+/// One failed poll should degrade the page, not blank it. The banner states what
+/// broke and stays until a later poll succeeds.
+function setBanner(message) {
+  const existing = document.getElementById("banner");
+  if (!message) {
+    existing?.remove();
+    return;
+  }
+  const banner = existing ?? el("div", { class: "banner", id: "banner" });
+  clear(banner).append(el("span", { class: "dot bad" }), el("span", { text: message }));
+  if (!existing) document.querySelector("main").prepend(banner);
 }
+
+async function refresh() {
+  const results = await Promise.allSettled([loadHealth(), loadStats(), loadBatches(), loadParticipants(), loadFeed()]);
+  const failed = results.filter((r) => r.status === "rejected");
+  setBanner(failed.length ? `${failed.length} of ${results.length} panels could not load: ${failed[0].reason?.message ?? "unknown error"}` : null);
+}
+
+/// Keys for the operator who lives in this screen all day. Nothing here shadows
+/// typing: every shortcut stands down while a field has focus.
+document.addEventListener("keydown", (event) => {
+  const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
+
+  if (event.key === "/" && !typing) {
+    event.preventDefault();
+    $("q").focus();
+    $("q").select();
+    return;
+  }
+  if (event.key === "Escape") {
+    if (typing) return document.activeElement.blur();
+    state.selected = null;
+    state.dossier = null;
+    renderDetail();
+    loadBatches();
+    history.replaceState(null, "", location.pathname);
+    return;
+  }
+  if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
+
+  if (event.key === "j" || event.key === "k") {
+    event.preventDefault();
+    if (!state.batches.length) return;
+    const at = state.batches.findIndex((b) => b.id === state.selected);
+    const next = event.key === "j" ? Math.min(at + 1, state.batches.length - 1) : Math.max(at - 1, 0);
+    select(state.batches[at === -1 ? 0 : next].id);
+    return;
+  }
+  const tabs = ["overview", "route", "timeline", "lineage", "cold chain", "actions"];
+  const index = Number(event.key) - 1;
+  if (state.dossier && index >= 0 && index < tabs.length) {
+    state.tab = tabs[index];
+    syncHash();
+    renderDetail();
+  }
+});
 
 await refresh();
 
@@ -524,12 +632,15 @@ await refresh();
 const hash = new URLSearchParams(location.hash.slice(1));
 const deepLink = Number(hash.get("lot"));
 if (deepLink) {
-  await select(deepLink).catch(() => {});
+  await select(deepLink, { scroll: false }).catch(() => {});
   const tab = hash.get("tab");
   if (tab) {
     state.tab = tab;
     renderDetail();
   }
+} else {
+  // Nothing selected: the panel shows the network rather than an instruction.
+  renderDetail();
 }
 
 setInterval(() => {

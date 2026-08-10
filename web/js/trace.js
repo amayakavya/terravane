@@ -1,4 +1,5 @@
 import { ago, clear, drawLineage, el, get, qty, temperatureChart, when } from "./api.js";
+import { custodyStops, journeyMap, routeDistance } from "./map.js";
 
 const root = document.getElementById("root");
 const id = new URLSearchParams(location.search).get("id");
@@ -61,6 +62,22 @@ async function main() {
   if (b.coldChainRequired) add("Cold chain", `${b.tempWindow[0]}°C to ${b.tempWindow[1]}°C · ${b.coldChainBreached ? "broken" : "held throughout"}`);
 
   root.append(el("section", { class: "panel" }, [el("h2", { text: "Provenance" }), el("div", { class: "panel-body" }, dl)]));
+
+  // ------------------------------------------------------------ route
+  const stops = custodyStops({ batch: b, handovers: data.journeyHandovers ?? [] });
+  const readings = data.telemetry.filter((t) => t.position).map((t) => ({ ...t.position, excursion: t.excursion }));
+  if (stops.length || readings.length) {
+    const km = routeDistance(stops);
+    root.append(
+      el("section", { class: "panel" }, [
+        el("h2", {}, ["Where it travelled", km > 1 ? el("span", { class: "count", text: `${Math.round(km).toLocaleString()} km` }) : null]),
+        el("div", { class: "panel-body" }, [
+          journeyMap(stops, readings, { height: 340 }),
+          el("div", { class: "faint", style: "font-size:12px;margin-top:10px", text: "Each point was written to the ledger when the lot changed hands or a sensor reported in." })
+        ])
+      ])
+    );
+  }
 
   // ------------------------------------------------------------ certificates
   if (data.certifications.length) {

@@ -12,7 +12,9 @@
     "deploy": "node scripts/deploy.js",
     "seed": "node scripts/seed.js",
     "server": "node server/index.js",
-    "stack": "node scripts/stack.js"
+    "stack": "node scripts/stack.js",
+    "smoke": "node scripts/smoke.js",
+    "basemap": "node scripts/build-basemap.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.0",

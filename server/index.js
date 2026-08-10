@@ -395,6 +395,7 @@ app.get("/api/trace/:id", async (req, res) => {
     warnings,
     batch,
     journey,
+    journeyHandovers: data.handovers,
     certifications: [...data.certifications, ...data.farmCertifications].filter((c) => c.active),
     telemetry: data.telemetry,
     lineage: lineage(id, 40),
