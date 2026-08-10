@@ -30,7 +30,12 @@ export class Indexer {
     this.running = false;
     this.timer = null;
     this.lastError = null;
-    this.syncing = false;
+    this.inflight = null;
+    this.pending = false;
+    this.floor = 0;
+    // False until the first backfill lands. Anything treating an open port as
+    // readiness would otherwise query an empty index and believe it.
+    this.ready = false;
   }
 
   get fromBlock() {
@@ -41,6 +46,7 @@ export class Indexer {
     this.running = true;
     await this.syncParticipants();
     await this.sync();
+    this.ready = true;
     this.timer = setInterval(() => {
       this.sync().catch((err) => {
         this.lastError = err.message;
@@ -84,25 +90,45 @@ export class Indexer {
     }
   }
 
-  async sync() {
-    if (this.syncing) return;
-    this.syncing = true;
-    try {
-      const head = await this.provider.getBlockNumber();
-      let from = this.fromBlock;
-      if (from > head) return;
+  /// Coalescing entry point. A write action awaits this expecting to see its own
+  /// transaction indexed when it returns, so a caller that lands mid-sync must not
+  /// be handed the run already in flight: it books another pass and waits for that.
+  ///
+  /// `throughBlock` is the block a caller knows exists, taken from its own receipt.
+  /// ethers caches the head for a provider's polling interval, so asking the
+  /// provider alone can report a height below a block that has demonstrably mined.
+  async sync({ throughBlock = 0 } = {}) {
+    this.pending = true;
+    if (throughBlock > this.floor) this.floor = throughBlock;
+    if (this.inflight) return this.inflight;
 
-      while (from <= head) {
-        const to = Math.min(from + CHUNK - 1, head);
-        await this.ingestRange(from, to);
-        setMeta(this.db, "lastBlock", to);
-        from = to + 1;
+    this.inflight = (async () => {
+      try {
+        while (this.pending) {
+          this.pending = false;
+          await this.ingestToHead();
+        }
+      } finally {
+        this.inflight = null;
       }
-      setMeta(this.db, "syncedAt", Date.now());
-      this.lastError = null;
-    } finally {
-      this.syncing = false;
+    })();
+
+    return this.inflight;
+  }
+
+  async ingestToHead() {
+    const head = Math.max(await this.provider.getBlockNumber(), this.floor);
+    let from = this.fromBlock;
+    if (from > head) return;
+
+    while (from <= head) {
+      const to = Math.min(from + CHUNK - 1, head);
+      await this.ingestRange(from, to);
+      setMeta(this.db, "lastBlock", to);
+      from = to + 1;
     }
+    setMeta(this.db, "syncedAt", Date.now());
+    this.lastError = null;
   }
 
   async ingestRange(fromBlock, toBlock) {

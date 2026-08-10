@@ -37,7 +37,9 @@ export function mountActions(app, { deployment, provider, indexer }) {
     }
     try {
       const result = await handler(req);
-      await indexer.sync();
+      // Sync through the block this action actually landed in, so the response
+      // never describes a ledger the caller cannot yet read back.
+      await indexer.sync({ throughBlock: result?.block ?? 0 });
       res.json({ ok: true, ...result });
     } catch (err) {
       if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });

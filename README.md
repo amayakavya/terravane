@@ -28,7 +28,7 @@ wipe the previous index and deployment before starting.
 ```bash
 npm test             # 58 contract tests
 npm run size         # contract sizes against the 24,576 byte deployment limit
-node scripts/smoke.js  # 30 end to end checks against a running stack
+node scripts/smoke.js  # 31 end to end checks against a running stack
 ```
 
 ## The problem this shape solves

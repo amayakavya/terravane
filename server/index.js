@@ -237,7 +237,8 @@ app.get("/api/health", async (_req, res) => {
     chainError = err.message;
   }
   res.json({
-    ok: chainError === null,
+    ok: chainError === null && indexer.ready,
+    ready: indexer.ready,
     rpc: RPC_URL,
     chainId: deployment.chainId,
     contracts: { accessRegistry: deployment.accessRegistry, produceRegistry: deployment.produceRegistry },

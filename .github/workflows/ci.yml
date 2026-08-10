@@ -45,8 +45,8 @@ jobs:
       - name: Serve and exercise the API
         run: |
           node server/index.js > /tmp/server.log 2>&1 &
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:4300/api/health > /dev/null && break
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:4300/api/health | grep -q '"ready":true' && break
             sleep 1
           done
           node scripts/smoke.js

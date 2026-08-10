@@ -39,8 +39,13 @@ async function main() {
 
   console.log("health and coverage");
   const health = (await api("/api/health")).body;
-  check("chain reachable", health.ok === true, health.chainError ?? "");
+  check("chain reachable", health.chainError === null, health.chainError ?? "");
+  check("indexer reports ready", health.ready === true);
   check("index has caught up with the chain head", health.indexedBlock === health.chainHead, `${health.indexedBlock} vs ${health.chainHead}`);
+  if (!health.ready) {
+    console.error("\nindexer never became ready; nothing downstream is worth asserting");
+    process.exit(1);
+  }
 
   // Every log the chain emitted must be in the index. This is the check that
   // catches a backfill starting from the wrong block.
@@ -55,7 +60,9 @@ async function main() {
   check("every chain log is indexed", stats.events === logs.length, `indexed ${stats.events}, chain ${logs.length}`);
 
   console.log("\nseeded state");
-  check("fourteen lots on the ledger", stats.batches === 14, String(stats.batches));
+  // The suite writes lots of its own, so it counts from where it finds the ledger
+  // rather than demanding a pristine chain. Everything below this is exact.
+  check("the fourteen seeded lots are present", stats.batches >= 14, String(stats.batches));
   check("five lots recalled", stats.recalled === 5, String(stats.recalled));
   check("one cold chain breach", stats.breached === 1, String(stats.breached));
   check("one handover still in flight", stats.openHandovers === 1, String(stats.openHandovers));
@@ -64,9 +71,9 @@ async function main() {
   console.log("\nconsumer verdicts");
   const mango = (await api(`/api/trace/${MANGO}`)).body;
   check("mango reads as caution", mango.verdict === "caution", mango.verdict);
-  check("mango names the cold chain break", mango.warnings.some((w) => /cold chain/i.test(w.text)));
+  check("mango names the cold chain break", mango.warnings?.some((w) => /cold chain/i.test(w.text)) === true);
   check("mango carries its certifications", mango.certifications.length > 0);
-  check("mango telemetry has an excursion", mango.telemetry.some((t) => t.excursion));
+  check("mango telemetry has an excursion", mango.telemetry?.some((t) => t.excursion) === true);
 
   const tea = (await api(`/api/trace/${TEA_DESCENDANTS[2]}`)).body;
   check("recalled tea child reads as unsafe", tea.verdict === "unsafe", tea.verdict);
@@ -90,6 +97,7 @@ async function main() {
   check("unknown lot answers 404", (await api("/api/batches/9999")).status === 404);
 
   console.log("\nwrite path");
+  const expectedId = stats.batches + 1;
   const created = await post("/api/actions/batches", {
     as: "Sundar Farms",
     produceType: "Okra",
@@ -97,7 +105,7 @@ async function main() {
     quantity: 250,
     unit: "kg"
   });
-  check("harvest recorded", created.status === 200 && created.body.batchId === 15, JSON.stringify(created.body));
+  check("harvest recorded", created.status === 200 && created.body.batchId === expectedId, JSON.stringify(created.body));
 
   const newId = created.body.batchId;
   const moved = await post(`/api/actions/batches/${newId}/transfer`, { as: "Sundar Farms", to: "Coldline Logistics", note: "smoke" });

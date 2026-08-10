@@ -47,7 +47,11 @@ export function loadArtifact(name) {
 }
 
 export function provider() {
-  return new ethers.JsonRpcProvider(RPC_URL);
+  const prov = new ethers.JsonRpcProvider(RPC_URL);
+  // The default four second cadence leaves the cached head stale for long enough
+  // that a freshly mined block looks like it does not exist yet.
+  prov.pollingInterval = 1000;
+  return prov;
 }
 
 /// Deterministic dev wallets, index-aligned with the Hardhat node's accounts.
