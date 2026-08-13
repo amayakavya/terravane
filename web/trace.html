@@ -11,14 +11,17 @@
 
 <header class="border-b border-outline-variant/70 bg-primary-deep text-gold-soft">
   <div class="max-w-3xl mx-auto flex items-center justify-between gap-4 px-5 py-4">
-    <div class="flex items-center gap-2.5">
+    <a href="/index.html" class="flex items-center gap-2.5 hover:opacity-90 transition-opacity">
       <svg width="26" height="26" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <path d="M32 6c8 4 12 12 10 22H22c-2-10 2-18 10-22z" fill="#e7d3a8"/>
         <path d="M14 38c6-4 12-6 18-6s12 2 18 6l-4 4c-5-3-9-4-14-4s-9 1-14 4z" fill="#b6863b"/>
       </svg>
       <span class="font-serif-display text-[19px] text-gold-soft" data-i18n="brand"></span>
-    </div>
-    <button id="lang-toggle" type="button" class="font-body-sm text-body-sm text-gold-soft/70 hover:text-gold-soft transition-colors"><span data-lang-label></span></button>
+    </a>
+    <button id="lang-toggle" type="button" class="flex items-center gap-1.5 px-3 py-2 rounded-full border border-gold-soft/30 hover:bg-white/5 transition-all text-gold-soft/80 hover:text-gold-soft font-body-sm text-body-sm">
+      <svg width="18" height="18" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="m476-80 182-480h84L924-80h-84l-43-122H603L560-80h-84ZM160-200l-56-56 202-202q-35-35-63.5-80T190-640h84q20 39 40 68t48 58q33-33 68.5-92.5T484-720H40v-80h280v-80h80v80h280v80H564q-21 72-63 148t-83 116l96 98-30 82-122-125-202 201Zm468-72h144l-72-204-72 204Z"/></svg>
+      <span data-lang-label></span>
+    </button>
   </div>
 </header>
 

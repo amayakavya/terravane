@@ -109,6 +109,7 @@ const PAGES = [
   { path: "/lot.html?id=5&tab=actions", needs: [], selector: "#tab-body", auth: true },
   { path: "/register.html", needs: [], selector: "#main", auth: "farmer" },
   { path: "/inspect.html", needs: [], selector: "#main", auth: "inspector", shot: "inspect" },
+  { path: "/regulator.html", needs: [], selector: "#main", auth: "admin", shot: "regulator" },
   { path: "/notifications.html", needs: [], selector: "#main", auth: true },
   { path: "/trace.html?id=5", needs: ["Mango"], selector: "#root", auth: false, shot: "trace", width: 900 },
   { path: "/trace.html?id=9", needs: [], selector: "#root", auth: false },

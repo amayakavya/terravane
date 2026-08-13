@@ -56,7 +56,9 @@ function render() {
       el("div", { class: "min-w-0" }, [
         el("div", { class: "flex items-center gap-3 flex-wrap mb-1.5" }, [
           el("h2", { class: "font-serif-display text-[28px] leading-none text-on-surface", text: `${b.produceType}${b.variety ? ` · ${b.variety}` : ""}` }),
-          badge(t(`trace.${verdict}`), tone)
+          verdict === "verified"
+            ? badge(t(`trace.${verdict}`), tone)
+            : el("a", { href: `/trace.html?id=${b.id}`, target: "_blank", rel: "noopener" }, [badge(t(`trace.${verdict}`), tone)])
         ]),
         el("p", { class: "font-label-md text-[13px] text-on-surface-variant", text: `${t("lot.title")} #${b.id} · ${qty(b.quantity, b.unit)} · ${stageLabel(b.stage)}` })
       ]),
@@ -83,6 +85,11 @@ function render() {
 
     el("div", { id: "tab-body", class: "rise-in" })
   );
+
+  // A deep link straight to a later tab (e.g. Actions) otherwise leaves the
+  // active tab scrolled out of the mobile tab strip with nothing showing which
+  // one is selected.
+  main.querySelector(".tab-active")?.scrollIntoView({ inline: "center", block: "nearest" });
 
   const body = document.getElementById("tab-body");
   ({ overview, route, timeline, lineage, cold, actions })[tab](body);
@@ -211,18 +218,32 @@ function attributesCard(attrs) {
   ], attrs.verified ? "" : "border-error/40");
 }
 
+// Average heavy-goods road freight carbon intensity, in the range GLEC/DEFRA-style
+// logistics carbon calculators report for a loaded truck (roughly 60-105 gCO2e per
+// tonne-kilometre). 62 g/tonne-km is the low end of that band, so this reads as a
+// conservative estimate rather than a worst case.
+const KG_CO2E_PER_TONNE_KM = 0.062;
+
+function foodMilesCO2(km, quantity, unit) {
+  if (unit !== "kg") return null;
+  const tonnes = Number(quantity) / 1000;
+  return km * tonnes * KG_CO2E_PER_TONNE_KM;
+}
+
 function route(body) {
   const stops = custodyStops(dossier);
   const readings = dossier.telemetry.filter((r) => r.position).map((r) => ({ ...r.position, excursion: r.excursion }));
   const km = routeDistance(stops);
   const days = dossier.batch.harvestedAt ? (Date.now() / 1000 - dossier.batch.harvestedAt) / 86400 : 0;
+  const co2 = foodMilesCO2(km, dossier.batch.quantity, dossier.batch.unit);
 
-  add(body, 
-    el("div", { class: "grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-5" }, [
+  add(body,
+    el("div", { class: "grid gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-5" }, [
       fact(t("lot.distance"), `${Math.round(km).toLocaleString()} km`),
       fact(t("lot.custodyPoints"), String(stops.length)),
       fact(t("lot.daysSince"), days.toFixed(1)),
-      fact(t("lot.positions"), String(readings.length))
+      fact(t("lot.positions"), String(readings.length)),
+      fact(t("reg.foodMiles"), co2 === null ? t("common.na") : `${co2.toFixed(1)} kg CO₂e`)
     ]),
     card([el("div", { class: "p-4" }, journeyMap(stops, readings, { width: 760, height: 430 }))])
   );

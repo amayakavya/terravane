@@ -268,6 +268,26 @@ and telemetry is only as honest as the gateway that reports it.
 [SECURITY.md](SECURITY.md) sets out the trust model, the known limitations and the
 invariants that count as security bugs if they ever break.
 
+## Roadmap
+
+Terravane is deliberately scoped to what a permissioned ledger should own: custody,
+certification, inspection and cold chain. It is not trying to replace India's
+existing agricultural market infrastructure, only to sit next to it.
+
+- **eNAM** — a lot's provenance and certification record is exactly the kind of
+  evidence an eNAM listing benefits from; the API is already shaped to expose it
+  to a marketplace rather than only the console.
+- **Agristack / Farmer ID** — a participant's chain address is already the
+  identity primitive this needs; mapping it to a farmer's Agristack ID is a
+  registration-time lookup, not a redesign.
+- **FPO co-operative accounts** — the access model already lets one participant
+  hold more than one role (a co-operative that both grows and processes today);
+  the same bitmask extends to an FPO acting on behalf of its member farmers.
+
+None of this is built. It is scoped here so the trust boundary — what the chain
+should own versus what a government system should own — is a decision made once,
+not discovered mid-integration.
+
 ## Credits
 
 Map outlines from [Natural Earth](https://www.naturalearthdata.com/), public

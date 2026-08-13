@@ -204,6 +204,9 @@ function navItems(participant) {
   if (roles.includes("inspector")) {
     items.push({ key: "inspect", icon: "fact_check", label: "nav.inspect", href: "/inspect.html" });
   }
+  if (roles.includes("admin")) {
+    items.push({ key: "regulator", icon: "shield", label: "nav.regulator", href: "/regulator.html" });
+  }
   items.push({ key: "notifications", icon: "notifications", label: "nav.notifications", href: "/notifications.html" });
   items.push({ key: "trace", icon: "qr_code_2", label: "nav.trace", href: "/trace.html" });
   return items;
@@ -251,10 +254,10 @@ export async function renderShell({ active, titleKey, title }) {
 
     sidebar.innerHTML = `
 <div class="absolute inset-0 grain pointer-events-none"></div>
-<div class="flex items-center gap-2.5 px-6 py-6 relative">
+<a href="/dashboard.html" class="flex items-center gap-2.5 px-6 py-6 relative hover:opacity-90 transition-opacity">
   ${logoMark(32)}
   <span class="font-serif-display text-[22px] tracking-tight text-gold-soft" data-i18n="brand"></span>
-</div>
+</a>
 <nav class="flex-1 px-3 py-2 flex flex-col gap-1 relative overflow-y-auto">${links}</nav>
 <div class="px-3 pb-4 pt-3 relative">
   <div class="h-px bg-white/10 mb-3"></div>
@@ -265,7 +268,7 @@ export async function renderShell({ active, titleKey, title }) {
       <p class="font-label-sm text-[10px] tracking-widest uppercase text-gold-soft/50 truncate">${(participant.roles ?? []).join(", ")}</p>
     </div>
   </div>
-  <button id="sign-out" type="button" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-gold-soft/50 hover:bg-error/10 hover:text-[#e2a396] transition-all">
+  <button class="sign-out-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-gold-soft/50 hover:bg-error/10 hover:text-[#e2a396] transition-all" type="button">
     ${icon("logout", { size: 20 })}
     <span class="font-body-md text-body-sm" data-i18n="nav.logout"></span>
   </button>
@@ -275,12 +278,12 @@ export async function renderShell({ active, titleKey, title }) {
   if (topbar) {
     topbar.innerHTML = `
 <div class="min-w-0">
-  <h1 class="font-serif-display text-[26px] leading-none text-on-surface truncate" ${titleKey ? `data-i18n="${titleKey}"` : ""}>${titleKey ? "" : (title ?? "")}</h1>
-  <p class="font-label-sm text-[11px] tracking-widest uppercase text-on-surface-variant/70 mt-1" id="chain-state"></p>
+  <h1 class="font-serif-display text-[20px] sm:text-[26px] leading-none text-on-surface truncate" ${titleKey ? `data-i18n="${titleKey}"` : ""}>${titleKey ? "" : (title ?? "")}</h1>
+  <p class="hidden sm:block font-label-sm text-[11px] tracking-widest uppercase text-on-surface-variant/70 mt-1" id="chain-state"></p>
 </div>
-<div class="flex items-center gap-3">
-  <button id="lang-toggle" type="button" class="flex items-center gap-1.5 px-3 py-2 rounded-full border border-outline-variant/60 hover:bg-surface-container transition-all text-on-surface-variant hover:text-primary font-body-sm text-body-sm">
-    ${icon("translate", { size: 18 })}<span data-lang-label></span>
+<div class="flex items-center gap-1.5 sm:gap-3 shrink-0">
+  <button id="lang-toggle" type="button" class="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-full border border-outline-variant/60 hover:bg-surface-container transition-all text-on-surface-variant hover:text-primary font-body-sm text-body-sm">
+    ${icon("translate", { size: 18 })}<span class="hidden sm:inline" data-lang-label></span>
   </button>
   <a href="/notifications.html" class="relative p-2.5 rounded-full hover:bg-surface-container transition-all text-on-surface-variant hover:text-primary">
     ${icon("notifications", { size: 20 })}
@@ -293,6 +296,9 @@ export async function renderShell({ active, titleKey, title }) {
       <p class="font-label-sm text-[10px] tracking-widest uppercase text-on-surface-variant/70 truncate">${participant.location ?? ""}</p>
     </div>
   </div>
+  <button class="sign-out-btn md:hidden p-2.5 rounded-full hover:bg-error/10 transition-all text-on-surface-variant hover:text-error" type="button" aria-label="${t("nav.logout")}">
+    ${icon("logout", { size: 20 })}
+  </button>
 </div>`;
   }
 
@@ -316,10 +322,12 @@ export async function renderShell({ active, titleKey, title }) {
     I18n.toggle();
     location.reload();
   });
-  $("#sign-out")?.addEventListener("click", () => {
-    session.clear();
-    location.href = "/index.html";
-  });
+  document.querySelectorAll(".sign-out-btn").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      session.clear();
+      location.href = "/index.html";
+    })
+  );
 
   paintChainState();
   setInterval(paintChainState, 8000);
@@ -335,10 +343,10 @@ async function paintChainState() {
     target.textContent = health.ok
       ? `${t("chain.head")} ${health.chainHead} · ${t("chain.indexed")} ${health.indexedBlock}`
       : t("chain.offline");
-    target.className = `font-label-sm text-[11px] tracking-widest uppercase mt-1 ${health.ok ? "text-on-surface-variant/70" : "text-error"}`;
+    target.className = `${health.ok ? "hidden sm:block" : "block"} font-label-sm text-[11px] tracking-widest uppercase mt-1 ${health.ok ? "text-on-surface-variant/70" : "text-error"}`;
   } catch {
     target.textContent = t("chain.offline");
-    target.className = "font-label-sm text-[11px] tracking-widest uppercase mt-1 text-error";
+    target.className = "block font-label-sm text-[11px] tracking-widest uppercase mt-1 text-error";
   }
 }
 

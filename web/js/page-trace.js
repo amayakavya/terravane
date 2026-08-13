@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { I18n, add, ago, badge, button, clear, el, icon, input, mount, notice, onDay, qty, t, when } from "./ui.js";
+import { I18n, add, ago, badge, button, clear, el, icon, input, mount, notice, onDay, qty, stageLabel, t, when } from "./ui.js";
 import { figureBox, lineageGraph, temperatureChart } from "./charts.js";
 import { custodyStops, journeyMap, routeDistance } from "./map.js";
 
@@ -170,17 +170,83 @@ function routePanel(data) {
   );
 }
 
+let lotListCache = null;
+const loadLots = () => lotListCache ?? (lotListCache = api.batches({ limit: 200 }).catch(() => []));
+
 function lookup() {
-  const box = input({ type: "number", min: "1", placeholder: t("trace.scanPrompt"), class: "w-56 rounded-lg border border-outline-variant bg-surface-container-lowest px-3.5 py-2.5 font-body-md text-body-sm" });
+  const box = input({
+    type: "text",
+    inputmode: "numeric",
+    autocomplete: "off",
+    placeholder: t("trace.scanPrompt"),
+    class: "w-56 rounded-lg border border-outline-variant bg-surface-container-lowest px-3.5 py-2.5 font-body-md text-body-sm relative z-10"
+  });
   const go = button(t("trace.trace"), { tone: "primary" });
-  const submit = () => {
-    if (box.value) location.search = `?id=${box.value}`;
+  const panel = el("div", {
+    class: "absolute left-0 right-0 top-[calc(100%+6px)] hidden max-h-64 overflow-y-auto rounded-lg border border-outline-variant/70 bg-surface-container-lowest shadow-lg z-20"
+  });
+  const wrap = el("div", { class: "relative w-56" }, [box, panel]);
+
+  const submit = (id) => {
+    const clean = String(id ?? box.value).replace(/\D/g, "");
+    if (clean) location.search = `?id=${clean}`;
   };
-  go.addEventListener("click", submit);
+
+  let batches = [];
+  loadLots().then((list) => {
+    batches = list;
+    renderOptions(batches);
+  });
+
+  function renderOptions(list) {
+    clear(panel);
+    if (!list.length) {
+      panel.classList.add("hidden");
+      return;
+    }
+    for (const b of list) {
+      panel.append(
+        el("button", {
+          type: "button",
+          class: "flex w-full items-center gap-3 px-3.5 py-2.5 text-left hover:bg-surface-container transition-colors border-b border-outline-variant/40 last:border-b-0",
+          onclick: () => submit(b.id)
+        }, [
+          el("span", { class: "font-label-md text-[12px] text-on-surface-variant/70 shrink-0", text: `#${b.id}` }),
+          el("span", { class: "min-w-0 flex-1" }, [
+            el("p", { class: "font-body-sm text-body-sm text-on-surface truncate", text: `${b.produceType}${b.variety ? ` · ${b.variety}` : ""}` }),
+            el("p", { class: "font-body-sm text-[11px] text-on-surface-variant/70 truncate", text: `${qty(b.quantity, b.unit)} · ${b.custodian?.name ?? b.origin?.location ?? ""}` })
+          ]),
+          badge(stageLabel(b.stage), b.recalled ? "bad" : b.stage === 6 ? "bad" : "neutral")
+        ])
+      );
+    }
+  }
+
+  function filter() {
+    const q = box.value.trim().toLowerCase();
+    if (!q) return batches;
+    return batches.filter((b) => String(b.id) === q || String(b.id).startsWith(q) || b.produceType?.toLowerCase().includes(q) || b.variety?.toLowerCase().includes(q));
+  }
+
+  box.addEventListener("focus", () => {
+    renderOptions(filter());
+    panel.classList.remove("hidden");
+  });
+  box.addEventListener("input", () => {
+    renderOptions(filter());
+    panel.classList.remove("hidden");
+  });
   box.addEventListener("keydown", (e) => {
     if (e.key === "Enter") submit();
+    if (e.key === "Escape") panel.classList.add("hidden");
   });
-  return el("div", { class: "flex items-center justify-center gap-2.5" }, [box, go]);
+  document.addEventListener("click", (e) => {
+    if (!wrap.contains(e.target)) panel.classList.add("hidden");
+  });
+
+  go.addEventListener("click", () => submit());
+
+  return el("div", { class: "flex items-center justify-center gap-2.5" }, [wrap, go]);
 }
 
 main();
