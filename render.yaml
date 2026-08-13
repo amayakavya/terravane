@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: terravane
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run stack
+    envVars:
+      - key: NODE_VERSION
+        value: 22.13.0
+      - key: TERRAVANE_PUBLIC_URL
+        value: https://terravane.onrender.com
