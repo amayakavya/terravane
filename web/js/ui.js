@@ -1,6 +1,6 @@
 import { I18n } from "./i18n.js";
 import { icon } from "./icons.js";
-import { api, session, STAGE_KEYS } from "./api.js";
+import { api, CUSTODY_ROLES, session, STAGE_KEYS } from "./api.js";
 
 export { icon, I18n };
 export const t = (key, vars) => I18n.t(key, vars);
@@ -109,6 +109,11 @@ export function badge(text, tone = "neutral") {
   });
 }
 
+/** Sold, destroyed, or fully consumed by a split/merge — nothing left to act on. */
+export function isClosed(batch) {
+  return batch.stage === 5 || batch.stage === 6 || (Number(batch.quantity) === 0 && batch.children?.length > 0);
+}
+
 /** Everything a lot is currently carrying, worst first. */
 export function lotFlags(batch) {
   const out = [];
@@ -147,6 +152,25 @@ export function notice(message, tone = "neutral") {
   return el("div", { class: `rounded-lg border px-4 py-3 font-body-sm text-body-sm whitespace-pre-wrap break-words ${style}`, text: message });
 }
 
+/**
+ * A confirmation that survives a full-page reload/rebuild. An in-form notice
+ * gets wiped the moment an action's success handler re-renders the tab it
+ * lives in — this mounts to document.body instead of the app root, so it
+ * lives on independent of whatever the page does next, and clears itself.
+ */
+export function toast(message, tone = "good", ms = 5000) {
+  let host = document.getElementById("toast-host");
+  if (!host) {
+    host = el("div", { id: "toast-host", class: "fixed top-6 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 w-[min(420px,calc(100vw-3rem))]" });
+    document.body.appendChild(host);
+  }
+  const node = notice(message, tone);
+  node.classList.add("w-full", "shadow-lg", "rise-in");
+  host.appendChild(node);
+  setTimeout(() => node.remove(), ms);
+  return node;
+}
+
 export function card(children, extra = "") {
   return el("section", { class: `rounded-xl border border-outline-variant/70 bg-surface-container-lowest ${extra}` }, children);
 }
@@ -170,7 +194,96 @@ const INPUT_CLASS =
   "text-on-surface placeholder:text-on-surface-variant/60 focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none transition-all";
 
 export const input = (attrs = {}) => el("input", { class: INPUT_CLASS, ...attrs });
-export const select = (attrs = {}, options = []) => el("select", { class: INPUT_CLASS, ...attrs }, options);
+
+const CHEVRON = '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" aria-hidden="true"><path d="m6 8 4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/**
+ * A dropdown themed like the rest of the app. A native <select>'s open
+ * option list is drawn by the OS, not the page — no CSS can restyle it, so
+ * it always looks foreign next to the rest of the UI. This builds the
+ * trigger and the option panel from the same primitives as everything
+ * else (rounded-lg, outline-variant border, primary hover), and keeps a
+ * hidden native <select> in sync underneath so every existing call site
+ * that reads `.value` or listens for `change` keeps working unchanged.
+ */
+export function select(attrs = {}, options = []) {
+  const native = el("select", { class: "sr-only", tabindex: "-1", "aria-hidden": "true", ...attrs }, options);
+
+  const label = el("span", { class: "truncate text-left flex-1" });
+  const trigger = el("button", {
+    type: "button",
+    class: `${INPUT_CLASS} cursor-pointer flex items-center justify-between gap-2 text-left`
+  }, [label, el("span", { class: "shrink-0 text-on-surface-variant", html: CHEVRON })]);
+
+  const panel = el("div", {
+    class: "hidden absolute z-20 mt-1.5 w-full max-h-60 overflow-y-auto rounded-lg border border-outline-variant " +
+      "bg-surface-container-lowest shadow-lg py-1"
+  });
+
+  function syncLabel() {
+    label.textContent = native.options[native.selectedIndex]?.text ?? "";
+  }
+
+  function closePanel() {
+    panel.classList.add("hidden");
+    document.removeEventListener("click", onOutsideClick, true);
+  }
+
+  function onOutsideClick(e) {
+    if (!wrap.contains(e.target)) closePanel();
+  }
+
+  function openPanel() {
+    clear(panel);
+    for (const opt of native.options) {
+      const selected = opt.value === native.value;
+      const row = el("button", {
+        type: "button",
+        class: "w-full text-left px-3.5 py-2 font-body-md text-body-sm transition-colors " +
+          (selected ? "bg-primary/10 text-primary font-medium" : "text-on-surface hover:bg-primary/5"),
+        text: opt.text
+      });
+      row.addEventListener("click", () => {
+        native.value = opt.value;
+        native.dispatchEvent(new Event("change", { bubbles: true }));
+        syncLabel();
+        closePanel();
+      });
+      panel.append(row);
+    }
+    panel.classList.remove("hidden");
+    document.addEventListener("click", onOutsideClick, true);
+  }
+
+  trigger.addEventListener("click", () => (panel.classList.contains("hidden") ? openPanel() : closePanel()));
+
+  const wrap = el("div", { class: "relative" }, [trigger, panel, native]);
+  syncLabel();
+
+  // Proxy .value / change-listening onto the hidden native select, so this
+  // wrapper is a drop-in replacement wherever `select()` used to hand back
+  // the raw <select> element.
+  Object.defineProperty(wrap, "value", {
+    get: () => native.value,
+    set(v) {
+      native.value = v;
+      syncLabel();
+    }
+  });
+  wrap.addEventListener = native.addEventListener.bind(native);
+  wrap.removeEventListener = native.removeEventListener.bind(native);
+
+  /** Swap the option list in place (e.g. a variety list that depends on a crop-type choice elsewhere). */
+  wrap.setOptions = (newOptions) => {
+    clear(native);
+    for (const opt of newOptions) native.append(opt);
+    native.selectedIndex = newOptions.length ? 0 : -1;
+    syncLabel();
+    if (!panel.classList.contains("hidden")) openPanel();
+  };
+
+  return wrap;
+}
 
 export const button = (label, { tone = "primary", ...attrs } = {}) => {
   const tones = {
@@ -193,16 +306,24 @@ export const button = (label, { tone = "primary", ...attrs } = {}) => {
 
 function navItems(participant) {
   const roles = participant.roles ?? [];
-  const items = [
-    { key: "dashboard", icon: "summarize", label: "nav.dashboard", href: "/dashboard.html" },
-    { key: "inventory", icon: "inventory_2", label: "nav.inventory", href: "/inventory.html" },
-    { key: "search", icon: "search", label: "nav.search", href: "/search.html" }
-  ];
+  const items = [{ key: "dashboard", icon: "summarize", label: "nav.dashboard", href: "/dashboard.html" }];
+  // Certifier, inspector, oracle, and admin act on lots without ever holding
+  // one — "My Inventory" would always be empty for them, so it isn't offered.
+  if (roles.some((r) => CUSTODY_ROLES.includes(r))) {
+    items.push({ key: "inventory", icon: "inventory_2", label: "nav.inventory", href: "/inventory.html" });
+  }
+  items.push({ key: "search", icon: "search", label: "nav.search", href: "/search.html" });
   if (roles.includes("farmer")) {
     items.push({ key: "register", icon: "agriculture", label: "dash.registerProduce", href: "/register.html" });
   }
   if (roles.includes("inspector")) {
     items.push({ key: "inspect", icon: "fact_check", label: "nav.inspect", href: "/inspect.html" });
+  }
+  if (roles.includes("certifier")) {
+    items.push({ key: "certify", icon: "verified", label: "nav.certify", href: "/certify.html" });
+  }
+  if (roles.includes("oracle")) {
+    items.push({ key: "telemetry", icon: "thermostat", label: "nav.telemetry", href: "/telemetry.html" });
   }
   if (roles.includes("admin")) {
     items.push({ key: "regulator", icon: "shield", label: "nav.regulator", href: "/regulator.html" });

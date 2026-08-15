@@ -1,5 +1,5 @@
-import { api } from "./api.js";
-import { add, card, cardHeader, clear, el, icon, mount, page, renderShell, t } from "./ui.js";
+import { api, CUSTODY_ROLES } from "./api.js";
+import { add, card, cardHeader, clear, el, icon, isClosed, mount, page, renderShell, t } from "./ui.js";
 import { lotTable, statTile } from "./lot-table.js";
 import { networkMap } from "./map.js";
 
@@ -32,26 +32,76 @@ const SHORTCUTS = {
     { label: "nav.inspect", href: "/inspect.html", icon: "fact_check", primary: true },
     { label: "nav.search", href: "/search.html", icon: "search" }
   ],
-  certifier: [{ label: "nav.search", href: "/search.html", icon: "verified", primary: true }],
-  oracle: [{ label: "nav.search", href: "/search.html", icon: "thermostat", primary: true }],
+  certifier: [
+    { label: "nav.certify", href: "/certify.html", icon: "verified", primary: true },
+    { label: "nav.search", href: "/search.html", icon: "search" }
+  ],
+  oracle: [
+    { label: "nav.telemetry", href: "/telemetry.html", icon: "thermostat", primary: true },
+    { label: "nav.search", href: "/search.html", icon: "search" }
+  ],
   admin: [{ label: "nav.search", href: "/search.html", icon: "search", primary: true }]
 };
+
+/// Certifier, inspector, sensor gateway, and admin never hold a lot — their
+/// "You hold" stat and "Recent Inventory" card would always read zero and
+/// empty by design, which reads as broken rather than as the custody-free
+/// model it actually is. Each gets the same work-queue view their own
+/// dedicated page shows, so the dashboard says something true instead.
+function workQueue(roles, all) {
+  if (roles.includes("certifier")) {
+    return {
+      title: "cert.viewUncertified",
+      href: "/certify.html",
+      rows: all.filter((b) => !b.recalled && !isClosed(b) && b.counts.certifications === 0)
+    };
+  }
+  if (roles.includes("inspector")) {
+    const seen = new Set();
+    const flagged = all.filter((b) => !isClosed(b) && (b.recalled || b.coldChainBreached || b.pendingCustodian) && (seen.has(b.id) ? false : seen.add(b.id)));
+    const uninspected = all.filter((b) => !b.recalled && !isClosed(b) && b.counts.inspections === 0 && !seen.has(b.id));
+    return { title: "insp.viewFlagged", href: "/inspect.html", rows: [...flagged, ...uninspected] };
+  }
+  if (roles.includes("oracle")) {
+    return {
+      title: "tele.viewActive",
+      href: "/telemetry.html",
+      rows: [...all].filter((b) => !b.recalled && !isClosed(b)).sort((a, b) => Number(b.coldChainRequired) - Number(a.coldChainRequired))
+    };
+  }
+  if (roles.includes("admin")) {
+    return {
+      title: "dash.needsAttention",
+      href: "/regulator.html",
+      rows: all.filter((b) => !isClosed(b) && (b.recalled || b.coldChainBreached))
+    };
+  }
+  return null;
+}
 
 async function main_() {
   const me = await renderShell({ active: "dashboard", title: t("nav.dashboard") });
   if (!me) return;
 
+  const roles = me.roles ?? [];
+  const holdsCustody = roles.some((r) => CUSTODY_ROLES.includes(r));
+
   await page(main, async () => {
-    const [stats, held, recentAll, participants] = await Promise.all([
+    const [stats, heldAll, recentAll, participants] = await Promise.all([
       api.stats(),
       api.batches({ custodian: me.address, limit: 200 }),
-      api.batches({ limit: 8 }),
+      api.batches({ limit: holdsCustody ? 8 : 200 }),
       api.participants()
     ]);
 
+    // Sold, destroyed, and consumed lots have nothing left to do with them — keep
+    // them off the dashboard so it does not pile up; they're still one click away
+    // in My Inventory's "Closed" filter, and fully intact on-chain either way.
+    const held = heldAll.filter((b) => !isClosed(b));
     const inTransit = held.filter((b) => b.stage === 3).length;
     const attention = held.filter((b) => b.recalled || b.coldChainBreached || !b.custodyIntact).length;
     const awaiting = recentAll.filter((b) => b.pendingCustodian?.address?.toLowerCase() === me.address.toLowerCase());
+    const queue = holdsCustody ? null : workQueue(roles, recentAll);
 
     mount(main, 
       hero(me, { held: held.length, inTransit, attention }),
@@ -64,14 +114,23 @@ async function main_() {
         : null,
 
       el("div", { class: "grid gap-6 xl:grid-cols-[1.4fr_1fr]" }, [
-        card([
-          cardHeader(t("dash.recentInventory"), el("a", {
-            class: "font-body-sm text-body-sm text-primary hover:underline",
-            href: "/inventory.html",
-            text: t("dash.viewAll")
-          })),
-          lotTable(held.slice(0, 8), { onEmpty: t("inv.empty"), dense: true })
-        ], "rise-in"),
+        queue
+          ? card([
+              cardHeader(t(queue.title), el("a", {
+                class: "font-body-sm text-body-sm text-primary hover:underline",
+                href: queue.href,
+                text: t("dash.viewAll")
+              })),
+              lotTable(queue.rows.slice(0, 8), { onEmpty: t("common.none"), dense: true })
+            ], "rise-in")
+          : card([
+              cardHeader(t("dash.recentInventory"), el("a", {
+                class: "font-body-sm text-body-sm text-primary hover:underline",
+                href: "/inventory.html",
+                text: t("dash.viewAll")
+              })),
+              lotTable(held.slice(0, 8), { onEmpty: t("inv.empty"), dense: true })
+            ], "rise-in"),
 
         card([
           cardHeader(t("net.title"), el("span", {

@@ -9,6 +9,56 @@ import { add, button, card, cardHeader, clear, el, field, icon, input, mount, no
 const main = document.getElementById("main");
 let me = null;
 
+const OTHER = "__other__";
+const CROP_TYPES = ["Rice", "Wheat", "Mango", "Tea", "Tomato", "Maize"];
+// Variety choices depend on the crop just picked — a farmer choosing "Rice"
+// should never see "Alphonso" (a mango variety) in the list beneath it.
+const VARIETIES_BY_CROP = {
+  Rice: ["Basmati"],
+  Wheat: ["Lok-1"],
+  Mango: ["Alphonso"],
+  Tea: ["Nilgiri Orthodox"],
+  Tomato: ["Pusa Ruby"],
+  Maize: []
+};
+const UNITS = ["kg", "quintal", "tonne"];
+const STORAGE_CONDITIONS = ["Ambient", "Refrigerated", "Frozen", "Cool & Ventilated", "Controlled Atmosphere"];
+const CURRENCIES = ["INR", "USD", "EUR"];
+
+function optionsWithOther(values) {
+  return [...values.map((value) => el("option", { value, text: value })), el("option", { value: OTHER, text: t("regp.other") })];
+}
+
+/**
+ * A dropdown backed by a fixed option list, with a trailing "Other" choice
+ * that swaps in a free-text box — the ledger accepts any produce type or
+ * unit a farmer names, so the list is a shortcut, not a restriction.
+ */
+function selectOrOther(name, options, { placeholder = "" } = {}) {
+  const other = input({ name: `${name}Other`, placeholder });
+  other.classList.add("hidden", "mt-2");
+  const picker = select({ name }, optionsWithOther(options));
+  picker.addEventListener("change", () => {
+    other.classList.toggle("hidden", picker.value !== OTHER);
+    if (picker.value === OTHER) other.focus();
+  });
+  return {
+    node: el("div", {}, [picker, other]),
+    get value() {
+      return (picker.value === OTHER ? other.value : picker.value).trim();
+    },
+    onChange(cb) {
+      picker.addEventListener("change", () => cb(this.value));
+    },
+    /** Replace the option list in place (crop type changing under a variety picker, say). */
+    setOptions(values) {
+      picker.setOptions(optionsWithOther(values));
+      other.classList.add("hidden");
+      other.value = "";
+    }
+  };
+}
+
 async function start() {
   me = await renderShell({ active: "register", title: t("regp.title") });
   if (!me) return;
@@ -23,14 +73,14 @@ async function start() {
 
 function render() {
   const f = {
-    produceType: input({ name: "produceType", placeholder: t("regp.cropTypePlaceholder"), required: "required" }),
-    variety: input({ name: "variety" }),
+    produceType: selectOrOther("produceType", CROP_TYPES, { placeholder: t("regp.cropTypePlaceholder") }),
+    variety: selectOrOther("variety", VARIETIES_BY_CROP.Rice),
     quantity: input({ name: "quantity", type: "number", min: "1", value: "1000" }),
-    unit: input({ name: "unit", value: "kg" }),
+    unit: selectOrOther("unit", UNITS),
     pricePerUnit: input({ name: "pricePerUnit", type: "number", step: "0.01" }),
-    currency: input({ name: "currency", value: "INR" }),
+    currency: selectOrOther("currency", CURRENCIES),
     grade: select({ name: "grade" }, ["A", "B", "C"].map((g) => el("option", { value: g, text: g }))),
-    storage: input({ name: "storage", placeholder: t("regp.storagePlaceholder") }),
+    storage: selectOrOther("storage", STORAGE_CONDITIONS, { placeholder: t("regp.storagePlaceholder") }),
     harvestDate: input({ name: "harvestDate", type: "date" }),
     expiresAt: input({ name: "expiresAt", type: "date" }),
     organic: select({ name: "organic" }, [
@@ -40,6 +90,9 @@ function render() {
     minTempC: input({ name: "minTempC", type: "number", step: "0.1" }),
     maxTempC: input({ name: "maxTempC", type: "number", step: "0.1" })
   };
+
+  // Variety list follows the crop just picked, so Rice never shows Alphonso.
+  f.produceType.onChange((crop) => f.variety.setOptions(VARIETIES_BY_CROP[crop] ?? []));
 
   const result = el("div", { class: "mt-5" });
   const submit = button(t("regp.submit"), { tone: "primary" });
@@ -92,14 +145,14 @@ function render() {
       card([
         cardHeader(t("regp.title")),
         el("div", { class: "px-6 py-6 grid gap-5 sm:grid-cols-2" }, [
-          field(t("regp.cropType"), f.produceType),
-          field(t("table.crop"), f.variety),
+          field(t("regp.cropType"), f.produceType.node),
+          field(t("table.crop"), f.variety.node),
           field(t("regp.quantity"), f.quantity),
-          field(t("regp.unit"), f.unit),
+          field(t("regp.unit"), f.unit.node),
           field(t("regp.price"), f.pricePerUnit),
-          field(t("regp.currency"), f.currency),
+          field(t("regp.currency"), f.currency.node),
           field(t("regp.quality"), f.grade),
-          field(t("regp.storage"), f.storage),
+          field(t("regp.storage"), f.storage.node),
           field(t("regp.harvestDate"), f.harvestDate),
           field(t("regp.expiryDate"), f.expiresAt),
           field(t("regp.organic"), f.organic),
@@ -123,10 +176,15 @@ function success(receipt) {
       el("span", { html: icon("check_circle", { size: 20 }) }),
       el("p", { class: "font-body-md text-body-md font-medium", text: t("regp.success") })
     ]),
-    el("p", { class: "font-body-sm text-body-sm text-on-surface-variant mb-3", text: t("regp.successDesc") }),
+    el("p", { class: "font-body-sm text-body-sm text-on-surface-variant mb-1", text: t("regp.successDesc") }),
+    el("p", { class: "flex items-center gap-1.5 font-body-sm text-body-sm text-primary mb-3" }, [
+      el("span", { html: icon("inventory_2", { size: 16 }) }),
+      el("span", { text: t("regp.addedToInventory") })
+    ]),
     el("p", { class: "font-label-md text-[13px] text-on-surface break-all mb-4", text: `${t("lot.title")} #${receipt.batchId} · ${receipt.metadataHash}` }),
     el("div", { class: "flex flex-wrap gap-2.5" }, [
-      el("a", { href: `/lot.html?id=${receipt.batchId}`, class: "inline-flex items-center gap-2 rounded-lg bg-primary text-on-primary px-4 py-2.5 font-body-sm text-body-sm", text: t("search.viewProduce") }),
+      el("a", { href: "/inventory.html", class: "inline-flex items-center gap-2 rounded-lg bg-primary text-on-primary px-4 py-2.5 font-body-sm text-body-sm", text: t("inv.title") }),
+      el("a", { href: `/lot.html?id=${receipt.batchId}`, class: "inline-flex items-center gap-2 rounded-lg border border-outline-variant px-4 py-2.5 font-body-sm text-body-sm text-on-surface hover:border-primary hover:text-primary", text: t("search.viewProduce") }),
       el("a", { href: `/label.html?id=${receipt.batchId}`, target: "_blank", rel: "noopener", class: "inline-flex items-center gap-2 rounded-lg border border-outline-variant px-4 py-2.5 font-body-sm text-body-sm text-on-surface hover:border-primary hover:text-primary", text: t("lot.printLabel") })
     ])
   ]);

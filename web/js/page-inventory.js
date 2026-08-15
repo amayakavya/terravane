@@ -1,9 +1,12 @@
 import { api } from "./api.js";
-import { add, card, cardHeader, clear, el, input, mount, page, renderShell, t } from "./ui.js";
+import { add, card, cardHeader, clear, el, input, isClosed, mount, page, renderShell, t } from "./ui.js";
 import { lotTable } from "./lot-table.js";
 
 // What this participant is holding right now, filterable. Anything they no longer
 // hold has left their responsibility and belongs on the search page instead.
+// Sold, destroyed, and consumed lots are hidden by default so the list does not
+// pile up with lots there is nothing left to do with — the "Closed" filter still
+// reaches them, and they stay fully intact on-chain either way.
 
 const main = document.getElementById("main");
 let held = [];
@@ -11,11 +14,12 @@ let query = "";
 let flag = "";
 
 const FLAGS = [
-  ["", "search.produce"],
+  ["", "inv.active"],
   ["clean", "trace.verified"],
   ["recalled", "flag.recalled"],
   ["breached", "flag.breached"],
-  ["open", "dist.pendingTransfers"]
+  ["open", "dist.pendingTransfers"],
+  ["closed", "inv.closed"]
 ];
 
 async function start() {
@@ -31,6 +35,8 @@ async function start() {
 function visible() {
   const needle = query.trim().toLowerCase();
   return held.filter((b) => {
+    if (flag === "closed") return isClosed(b);
+    if (flag === "" && isClosed(b)) return false;
     if (flag === "clean" && (b.recalled || b.coldChainBreached || !b.custodyIntact)) return false;
     if (flag === "recalled" && !b.recalled) return false;
     if (flag === "breached" && !b.coldChainBreached) return false;
@@ -53,7 +59,7 @@ function render() {
   mount(main, 
     el("div", { class: "mb-6" }, [
       el("h2", { class: "font-serif-display text-[26px] text-on-surface mb-1", text: t("inv.title") }),
-      el("p", { class: "font-body-md text-body-md text-on-surface-variant", text: t("inv.holding", { count: `${held.length} ${t("inv.lots")}` }) })
+      el("p", { class: "font-body-md text-body-md text-on-surface-variant", text: t("inv.holding", { count: `${held.filter((b) => !isClosed(b)).length} ${t("inv.lots")}` }) })
     ]),
     card([
       el("div", { class: "flex flex-wrap items-center gap-2.5 px-6 py-4 border-b border-outline-variant/60" }, [
@@ -66,7 +72,7 @@ function render() {
                 ? "border-primary text-primary bg-primary/5"
                 : "border-outline-variant text-on-surface-variant hover:border-primary/50"
             }`,
-            text: value === "" ? t("dash.viewAll") : t(key),
+            text: t(key),
             onclick: () => {
               flag = value;
               render();

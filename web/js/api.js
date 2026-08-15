@@ -92,6 +92,11 @@ export const session = {
   }
 };
 
+/** Roles that can ever hold a lot's custody — everyone else acts on lots without owning them. */
+export const CUSTODY_ROLES = ["farmer", "processor", "distributor", "retailer"];
+
+export const CERT_SCHEMES = ["NPOP Organic", "India Organic", "GlobalGAP", "Residue Free", "FSSAI Compliant", "Fair Trade Certified", "Rainforest Alliance"];
+
 export const STAGE_KEYS = [
   "stage.harvested",
   "stage.processed",
@@ -104,10 +109,10 @@ export const STAGE_KEYS = [
 
 /** Which actions a role may even attempt, so the interface offers only those. */
 export const ROLE_ACTIONS = {
-  farmer: ["transfer", "accept", "cancel", "telemetry", "split", "recall"],
-  processor: ["transfer", "accept", "cancel", "stage", "telemetry", "split", "recall"],
-  distributor: ["transfer", "accept", "cancel", "stage", "telemetry"],
-  retailer: ["transfer", "accept", "cancel", "stage", "telemetry", "sell"],
+  farmer: ["transfer", "accept", "cancel", "telemetry", "split", "recall", "destroy"],
+  processor: ["transfer", "accept", "cancel", "stage", "telemetry", "split", "recall", "destroy"],
+  distributor: ["transfer", "accept", "cancel", "stage", "telemetry", "destroy"],
+  retailer: ["transfer", "accept", "cancel", "stage", "telemetry", "sell", "destroy"],
   certifier: ["certify"],
   inspector: ["inspect", "recall", "destroy"],
   oracle: ["telemetry"],

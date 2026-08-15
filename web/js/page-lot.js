@@ -1,6 +1,7 @@
-import { allowedActions, api, session, STAGE_KEYS } from "./api.js";
-import { add, ago, badge, button, card, cardHeader, clear, el, emptyState, field, icon, input, mount, notice, onDay, page, qty, renderShell, select, stageLabel, t, when } from "./ui.js";
+import { allowedActions, api, CERT_SCHEMES, session, STAGE_KEYS } from "./api.js";
+import { add, ago, badge, button, card, cardHeader, clear, el, emptyState, field, icon, input, mount, notice, onDay, page, qty, renderShell, select, stageLabel, t, toast, when } from "./ui.js";
 import { figureBox, lineageGraph, temperatureChart } from "./charts.js";
+import { statTile } from "./lot-table.js";
 import { custodyStops, journeyMap, routeDistance } from "./map.js";
 
 const main = document.getElementById("main");
@@ -395,7 +396,7 @@ const ACTIONS = {
   },
   certify: {
     label: "act.certify",
-    fields: [["scheme", "act.scheme", "text"], ["expiresInDays", "act.validDays", "number"]],
+    fields: [["scheme", "act.scheme", "scheme"], ["expiresInDays", "act.expiryDate", "date"]],
     run: (id, body) => api.certify(id, body)
   },
   inspect: {
@@ -414,11 +415,59 @@ const ACTIONS = {
   destroy: { label: "act.destroy", danger: true, fields: [["reason", "act.reason", "text"]], run: (id, body) => api.destroy(id, body) }
 };
 
+// A dedicated sale slab, separate from the generic action chooser below — this
+// is the one action a retailer does over and over on the same lot as stock
+// moves, so it gets its own quantity field and a running sold/remaining
+// readout instead of being buried behind a dropdown every time.
+function saleSlab(b, remaining) {
+  const quantityInput = input({ type: "number", min: "1", max: String(remaining), placeholder: t("act.quantity") });
+  const result = el("div", { class: "mt-4" });
+  const submit = button(t("act.sell"), { tone: "primary" });
+
+  submit.addEventListener("click", async () => {
+    const value = Number(quantityInput.value);
+    if (!value || value <= 0 || value > remaining) {
+      mount(result, notice(t("act.quantity"), "bad"));
+      return;
+    }
+    submit.disabled = true;
+    clear(result);
+    try {
+      await api.sell(b.id, { as: me.address, quantity: value });
+      toast(`${t("act.sell")} — ${t("act.done")}`, "good");
+      await reload();
+      tab = "actions";
+    } catch (err) {
+      add(result, notice(err.message, "bad"));
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  return card([
+    cardHeader(t("act.sell")),
+    el("div", { class: "px-6 py-5" }, [
+      el("div", { class: "grid grid-cols-2 gap-4 mb-5" }, [
+        statTile(t("status.sold"), qty(b.soldQuantity, b.unit)),
+        statTile(t("act.remaining"), qty(remaining, b.unit))
+      ]),
+      field(t("act.quantity"), quantityInput),
+      el("div", { class: "mt-5" }, submit),
+      result
+    ])
+  ], "rise-in mb-6");
+}
+
 async function actions(body) {
   const b = dossier.batch;
   const mine = b.custodian?.address?.toLowerCase() === me.address.toLowerCase();
   const offered = b.pendingCustodian?.address?.toLowerCase() === me.address.toLowerCase();
   const roles = me.roles ?? [];
+
+  const remaining = Number(b.quantity) - Number(b.soldQuantity);
+  if (roles.includes("retailer") && mine && !b.recalled && b.stage < 5 && remaining > 0) {
+    add(body, saleSlab(b, remaining));
+  }
 
   // Only offer what this participant could actually do with this lot. The chain
   // refuses the rest anyway; presenting them would just be a menu of failures.
@@ -428,7 +477,7 @@ async function actions(body) {
     if (key === "cancel") return Boolean(b.pendingCustodian) && (mine || offered);
     if (key === "telemetry") return mine || roles.includes("oracle");
     if (key === "recall") return !b.recalled;
-    if (key === "destroy") return b.stage !== 6;
+    if (key === "destroy") return b.stage !== 6 && (mine || roles.includes("inspector") || roles.includes("admin"));
     return true;
   });
 
@@ -468,11 +517,24 @@ async function actions(body) {
     const spec = ACTIONS[chooser.value];
     const payload = { as: me.address };
     for (const [name, , kind] of spec.fields) {
-      const node = fields.querySelector(`[name="${name}"]`);
-      let value = node.value;
-      if (kind === "bool") value = value === "true";
-      else if (kind === "list") value = value.split(",").map((s) => s.trim()).filter(Boolean);
-      else if (kind === "number" && value !== "") value = Number(value);
+      let value;
+      if (kind === "scheme") {
+        const choice = fields.querySelector(`[data-scheme-select="${name}"]`);
+        const custom = fields.querySelector(`[data-scheme-custom="${name}"]`);
+        value = choice.value === "custom" ? custom.value : choice.value;
+      } else {
+        const node = fields.querySelector(`[name="${name}"]`);
+        value = node.value;
+        if (kind === "bool") value = value === "true";
+        else if (kind === "list") value = value.split(",").map((s) => s.trim()).filter(Boolean);
+        else if (kind === "number" && value !== "") value = Number(value);
+        else if (kind === "date") {
+          const target = new Date(`${value}T00:00:00`);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          value = value ? Math.max(0, Math.round((target - today) / 86400000)) : 0;
+        }
+      }
       payload[name] = value;
     }
 
@@ -480,13 +542,20 @@ async function actions(body) {
     clear(result);
     try {
       const receipt = await spec.run(b.id, payload);
-      add(result, 
-        notice(
-          `${t("act.committed", { block: receipt.block, gas: Number(receipt.gasUsed).toLocaleString() })}\n${receipt.txHash}` +
-            (receipt.propagated?.length ? `\n${receipt.propagated.map((n) => `#${n}`).join(", ")}` : ""),
-          "good"
-        )
-      );
+      // Block number, gas, and tx hash are real, but not what a farmer needs to
+      // know "did this go through" — keep them in the in-panel detail only, and
+      // keep the toast to the plain confirmation plus anything actually
+      // actionable, like which lots a recall reached.
+      const detail =
+        `${t("act.committed", { block: receipt.block, gas: Number(receipt.gasUsed).toLocaleString() })}\n${receipt.txHash}`;
+      const summary =
+        `${t(spec.label)} — ${t("act.done")}` +
+        (receipt.propagated?.length ? `\n${t("act.recalled", { count: `${receipt.propagated.length}`, list: receipt.propagated.map((n) => `#${n}`).join(", ") })}` : "");
+      add(result, notice(`${summary}\n${detail}`, "good"));
+      // The reload below rebuilds this whole tab, which would otherwise wipe the
+      // notice above before anyone reads it — the toast lives outside this tab
+      // and survives that rebuild.
+      toast(summary, "good");
       await reload();
       tab = "actions";
     } catch (err) {
@@ -527,6 +596,31 @@ function control(name, kind, participants, batch) {
       el("option", { value: "true", text: t("inspect.submitPass") }),
       el("option", { value: "false", text: t("inspect.submitFail") })
     ]);
+  }
+  if (kind === "scheme") {
+    const choice = select({ "data-scheme-select": name }, [
+      ...CERT_SCHEMES.map((s) => el("option", { value: s, text: s })),
+      el("option", { value: "custom", text: t("act.schemeCustom") })
+    ]);
+    const custom = input({ "data-scheme-custom": name, placeholder: t("act.scheme") });
+    custom.style.display = "none";
+    choice.addEventListener("change", () => {
+      custom.style.display = choice.value === "custom" ? "" : "none";
+    });
+    return el("div", { class: "grid gap-2" }, [choice, custom]);
+  }
+  if (kind === "date") {
+    const today = new Date();
+    const inAYear = new Date();
+    inAYear.setDate(inAYear.getDate() + 365);
+    // The certificate's own validity, not the produce's shelf life — a
+    // different thing the certifier decides. Default to what the farmer
+    // registered as the produce's expiry, since that's the one date already
+    // on record, but it stays editable: an annual audit cert can easily run
+    // shorter or longer than the lot's shelf life.
+    const registered = name === "expiresInDays" ? dossier?.attributes?.attributes?.expiresAt : null;
+    const fallback = inAYear.toISOString().slice(0, 10);
+    return input({ name, type: "date", min: today.toISOString().slice(0, 10), value: registered || fallback });
   }
   return input({ name, type: kind === "number" ? "number" : "text", step: kind === "number" ? "any" : null });
 }

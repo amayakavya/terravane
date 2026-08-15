@@ -1,0 +1,335 @@
+<title>Terravane Walkthrough</title>
+<style>
+  @font-face {
+    font-family: 'Manrope';
+    src: local('Manrope');
+    font-weight: 400 800;
+  }
+
+  :root {
+    --primary: #006947;
+    --primary-deep: #04241a;
+    --primary-container: #00855b;
+    --gold: #b6863b;
+    --gold-soft: #e7d3a8;
+    --surface: #f7f4ea;
+    --surface-container: #ece7d7;
+    --surface-container-low: #f1ede0;
+    --surface-lowest: #ffffff;
+    --on-surface: #1c2420;
+    --on-surface-variant: #5b6058;
+    --outline-variant: #dcd5bf;
+    --error: #a13a2c;
+    --shadow: 0 1px 2px rgba(4, 36, 26, 0.06), 0 8px 24px -12px rgba(4, 36, 26, 0.18);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --primary: #6fdba8;
+      --primary-deep: #eaffef;
+      --primary-container: #0f4a34;
+      --gold: #e7d3a8;
+      --gold-soft: #b6863b;
+      --surface: #10201a;
+      --surface-container: #17281f;
+      --surface-container-low: #142219;
+      --surface-lowest: #0c1712;
+      --on-surface: #e7f2ea;
+      --on-surface-variant: #a7b3a9;
+      --outline-variant: #2b3b31;
+      --error: #ff9a86;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --primary: #6fdba8;
+    --primary-deep: #eaffef;
+    --primary-container: #0f4a34;
+    --gold: #e7d3a8;
+    --gold-soft: #b6863b;
+    --surface: #10201a;
+    --surface-container: #17281f;
+    --surface-container-low: #142219;
+    --surface-lowest: #0c1712;
+    --on-surface: #e7f2ea;
+    --on-surface-variant: #a7b3a9;
+    --outline-variant: #2b3b31;
+    --error: #ff9a86;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--surface);
+    color: var(--on-surface);
+    font-family: 'Work Sans', system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+  }
+
+  header.hero {
+    margin-bottom: 48px;
+  }
+
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gold);
+    font-weight: 600;
+  }
+
+  h1 {
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: clamp(30px, 5vw, 42px);
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    margin: 10px 0 14px;
+    text-wrap: balance;
+    color: var(--primary-deep);
+  }
+
+  header.hero p {
+    font-size: 17px;
+    color: var(--on-surface-variant);
+    max-width: 60ch;
+    margin: 0;
+  }
+
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .step {
+    display: grid;
+    grid-template-columns: 44px 1fr;
+    gap: 18px;
+    background: var(--surface-lowest);
+    border: 1px solid var(--outline-variant);
+    border-radius: 14px;
+    padding: 24px 24px 26px;
+    box-shadow: var(--shadow);
+  }
+
+  .step-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    font-weight: 600;
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    background: var(--primary-container);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .step h2 {
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 19px;
+    letter-spacing: -0.01em;
+    margin: 4px 0 8px;
+    color: var(--on-surface);
+  }
+
+  .step p {
+    margin: 0 0 10px;
+    color: var(--on-surface-variant);
+    font-size: 15px;
+  }
+
+  .step p:last-child { margin-bottom: 0; }
+
+  .note {
+    margin-top: 12px;
+    background: var(--surface-container-low);
+    border: 1px solid var(--outline-variant);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 14px;
+    color: var(--on-surface);
+  }
+
+  .note strong {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--primary);
+    margin-bottom: 4px;
+  }
+
+  code, .path {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.86em;
+    background: var(--surface-container);
+    border: 1px solid var(--outline-variant);
+    padding: 2px 6px;
+    border-radius: 5px;
+    color: var(--on-surface);
+    word-break: break-word;
+  }
+
+  .roster {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .roster span {
+    font-size: 13px;
+    background: var(--surface-container-low);
+    border: 1px solid var(--outline-variant);
+    border-radius: 8px;
+    padding: 7px 10px;
+    color: var(--on-surface);
+  }
+
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 44px 0 24px;
+    color: var(--on-surface-variant);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .divider::before,
+  .divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--outline-variant);
+  }
+
+  .arrival {
+    background: var(--primary-container);
+    color: #ffffff;
+    border-radius: 14px;
+    padding: 28px 26px;
+    box-shadow: var(--shadow);
+  }
+
+  .arrival h2 {
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-size: 20px;
+    margin: 0 0 8px;
+  }
+
+  .arrival p {
+    margin: 0;
+    color: #eafff1;
+    font-size: 15px;
+    max-width: 56ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .arrival { color: var(--primary-deep); }
+    :root:not([data-theme="light"]) .arrival p { color: var(--primary-deep); opacity: 0.85; }
+  }
+  :root[data-theme="dark"] .arrival { color: var(--primary-deep); }
+  :root[data-theme="dark"] .arrival p { color: var(--primary-deep); opacity: 0.85; }
+
+  a { color: var(--primary); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .step { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">Getting started</div>
+    <h1>From a cold machine to signed in</h1>
+    <p>Everything between double-clicking the launcher and landing on your dashboard — the local stack, the welcome screen, and choosing who you are on the network.</p>
+  </header>
+
+  <div class="steps">
+
+    <div class="step">
+      <div class="step-num">1</div>
+      <div>
+        <h2>Start the local stack</h2>
+        <p>Double-click <span class="path">start-terravane.bat</span> in the project's root folder. No commands to type.</p>
+        <p>It compiles the contracts, boots a local chain, deploys them, seeds a season of demo produce, and starts the server — two console windows will open and stay open while it runs.</p>
+        <div class="note">
+          <strong>What you'll see</strong>
+          "Terravane Chain" and "Terravane Server" windows, each filling with log lines. Leave both open — closing either one takes the app down.
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">2</div>
+      <div>
+        <h2>Open the site</h2>
+        <p>Your browser opens automatically once the server's ready. If it doesn't, go to <span class="path">http://localhost:4300</span> yourself.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">3</div>
+      <div>
+        <h2>The welcome screen</h2>
+        <p>You'll land on a live snapshot of the network — lots on the ledger, blocks indexed, participants enrolled — before you've chosen anything. It's reading straight off the chain, not a mockup.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">4</div>
+      <div>
+        <h2>Pick your role</h2>
+        <p>Farmer, Processor, Distributor, Retailer, Certifier, Inspector, Sensor gateway, or Admin. This decides what the console lets you do, not who you're allowed to pretend to be — every role here is a real enrolled participant type on the chain.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">5</div>
+      <div>
+        <h2>Pick your organisation</h2>
+        <p>Choosing a role narrows the list to organisations actually enrolled under it. For Farmer, that's:</p>
+        <div class="roster">
+          <span>Sundar Farms</span>
+          <span>Nilgiri Highland Estates</span>
+          <span>Konkan Mango Co-op</span>
+          <span>Anand Growers Collective</span>
+        </div>
+        <div class="note">
+          <strong>No password, on purpose</strong>
+          There's no login form because there's nothing to type. Your identity here is a chain address — picking the org signs you in as it, using local development keys this build holds for you.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="divider">You're in</div>
+
+  <div class="arrival">
+    <h2>Dashboard, live</h2>
+    <p>One click after picking your org, you're looking at real seeded data — held lots, pending signatures, a recalled tea lot, a cold-chain breach on a mango shipment. Everything from here is a separate walkthrough.</p>
+  </div>
+
+</div>

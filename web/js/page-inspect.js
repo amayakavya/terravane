@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { add, button, card, cardHeader, clear, el, field, input, mount, notice, page, renderShell, select, t } from "./ui.js";
+import { add, button, card, cardHeader, clear, el, field, input, isClosed, mount, notice, page, renderShell, select, t } from "./ui.js";
 import { lotTable } from "./lot-table.js";
 
 // The inspector's working surface: what is worth looking at, and the form to
@@ -25,8 +25,8 @@ async function start() {
     ]);
 
     const seen = new Set();
-    const queue = [...breached, ...open].filter((b) => (seen.has(b.id) ? false : seen.add(b.id)));
-    const uninspected = all.filter((b) => !b.recalled && b.counts.inspections === 0 && b.stage < 5).slice(0, 12);
+    const queue = [...breached, ...open].filter((b) => !isClosed(b) && (seen.has(b.id) ? false : seen.add(b.id)));
+    const uninspected = all.filter((b) => !b.recalled && !isClosed(b) && b.counts.inspections === 0).slice(0, 12);
 
     mount(main, 
       el("div", { class: "mb-6 max-w-2xl" }, [

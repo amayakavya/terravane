@@ -1,0 +1,400 @@
+<title>Terravane Console Tour</title>
+<style>
+  @font-face {
+    font-family: 'Manrope';
+    src: local('Manrope');
+    font-weight: 400 800;
+  }
+
+  :root {
+    --primary: #006947;
+    --primary-deep: #04241a;
+    --primary-container: #00855b;
+    --gold: #b6863b;
+    --gold-soft: #e7d3a8;
+    --surface: #f7f4ea;
+    --surface-container: #ece7d7;
+    --surface-container-low: #f1ede0;
+    --surface-lowest: #ffffff;
+    --on-surface: #1c2420;
+    --on-surface-variant: #5b6058;
+    --outline-variant: #dcd5bf;
+    --error: #a13a2c;
+    --warn: #8a6425;
+    --shadow: 0 1px 2px rgba(4, 36, 26, 0.06), 0 8px 24px -12px rgba(4, 36, 26, 0.18);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --primary: #6fdba8;
+      --primary-deep: #eaffef;
+      --primary-container: #0f4a34;
+      --gold: #e7d3a8;
+      --gold-soft: #b6863b;
+      --surface: #10201a;
+      --surface-container: #17281f;
+      --surface-container-low: #142219;
+      --surface-lowest: #0c1712;
+      --on-surface: #e7f2ea;
+      --on-surface-variant: #a7b3a9;
+      --outline-variant: #2b3b31;
+      --error: #ff9a86;
+      --warn: #e7c17a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --primary: #6fdba8;
+    --primary-deep: #eaffef;
+    --primary-container: #0f4a34;
+    --gold: #e7d3a8;
+    --gold-soft: #b6863b;
+    --surface: #10201a;
+    --surface-container: #17281f;
+    --surface-container-low: #142219;
+    --surface-lowest: #0c1712;
+    --on-surface: #e7f2ea;
+    --on-surface-variant: #a7b3a9;
+    --outline-variant: #2b3b31;
+    --error: #ff9a86;
+    --warn: #e7c17a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--surface);
+    color: var(--on-surface);
+    font-family: 'Work Sans', system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+  }
+
+  header.hero { margin-bottom: 52px; }
+
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gold);
+    font-weight: 600;
+  }
+
+  h1 {
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: clamp(30px, 5vw, 42px);
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    margin: 10px 0 14px;
+    text-wrap: balance;
+    color: var(--primary-deep);
+  }
+
+  header.hero p {
+    font-size: 17px;
+    color: var(--on-surface-variant);
+    max-width: 62ch;
+    margin: 0;
+  }
+
+  h2.group-title {
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--primary);
+    margin: 0 0 6px;
+  }
+
+  .group-sub {
+    font-size: 14px;
+    color: var(--on-surface-variant);
+    margin: 0 0 20px;
+    max-width: 60ch;
+  }
+
+  .group { margin-bottom: 48px; }
+
+  .cards {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .card {
+    background: var(--surface-lowest);
+    border: 1px solid var(--outline-variant);
+    border-radius: 14px;
+    padding: 22px 24px 24px;
+    box-shadow: var(--shadow);
+  }
+
+  .card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+
+  .card h3 {
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: -0.01em;
+    margin: 0;
+    color: var(--on-surface);
+  }
+
+  .who {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--on-surface-variant);
+    white-space: nowrap;
+    padding-top: 3px;
+  }
+
+  .card > p {
+    margin: 0 0 12px;
+    color: var(--on-surface-variant);
+    font-size: 15px;
+  }
+
+  .card > p:last-child { margin-bottom: 0; }
+
+  .field-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 6px;
+    margin: 10px 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .field-list li {
+    font-size: 13px;
+    background: var(--surface-container-low);
+    border: 1px solid var(--outline-variant);
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: var(--on-surface);
+  }
+
+  .note {
+    margin-top: 12px;
+    background: var(--surface-container-low);
+    border: 1px solid var(--outline-variant);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 14px;
+    color: var(--on-surface);
+  }
+
+  .note strong {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--primary);
+    margin-bottom: 4px;
+  }
+
+  .note.warn strong { color: var(--warn); }
+  .note.warn { border-color: color-mix(in srgb, var(--warn) 40%, var(--outline-variant)); }
+
+  .flow {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 14px;
+    color: var(--on-surface);
+  }
+
+  .flow-step .n {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--primary-container);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  code, .path {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.86em;
+    background: var(--surface-container);
+    border: 1px solid var(--outline-variant);
+    padding: 2px 6px;
+    border-radius: 5px;
+    color: var(--on-surface);
+    word-break: break-word;
+  }
+
+  .pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    border-radius: 999px;
+    padding: 4px 10px;
+    border: 1px solid;
+  }
+
+  .pill.good { color: var(--primary); border-color: color-mix(in srgb, var(--primary) 40%, transparent); background: color-mix(in srgb, var(--primary) 8%, transparent); }
+  .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+  .pill.bad { color: var(--error); border-color: color-mix(in srgb, var(--error) 40%, transparent); background: color-mix(in srgb, var(--error) 8%, transparent); }
+
+  a { color: var(--primary); }
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">The console, mapped</div>
+    <h1>Everywhere you can go from here</h1>
+    <p>Picking up right after sign-in. Not a sequence — pages you'll actually use, grouped by what they're for: the day-to-day work, moving produce along, and what nobody signed in can still see.</p>
+  </header>
+
+  <section class="group">
+    <h2 class="group-title">Everyday</h2>
+    <p class="group-sub">Where you land, and where you check on what you're holding.</p>
+    <div class="cards">
+
+      <div class="card">
+        <div class="card-head"><h3>Dashboard</h3><span class="who">Everyone</span></div>
+        <p>Opens straight after you pick your organisation. Greets you by name and location, then three numbers up top: <strong>you hold</strong>, <strong>in transit</strong>, <strong>needs attention</strong>.</p>
+        <p>Below that, a <strong>Pending Transfers</strong> table for anything waiting on your signature, a <strong>Recent Inventory</strong> strip, and <em>Where the chain is</em> — every enrolled participant sized by how much they're holding, on a real map.</p>
+        <div class="pill-row">
+          <span class="pill good">On the ledger</span>
+          <span class="pill bad">Recalled</span>
+          <span class="pill warn">Cold chain broken</span>
+          <span class="pill good">Pending transfers</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>My Inventory</h3><span class="who">Everyone</span></div>
+        <p>Every lot you currently hold, one row each: ref ID, crop, quantity, status, held by. A search box and five filter pills — <span class="path">View all</span>, <span class="path">Verified</span>, <span class="path">Recalled</span>, <span class="path">Cold chain broken</span>, <span class="path">Pending transfers</span>.</p>
+        <p>Anything you no longer hold drops off this list on its own — it belongs to whoever accepted it next.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Global Search</h3><span class="who">Everyone</span></div>
+        <p>The same table, but unfiltered by who's holding what — every lot on the whole network, searchable by crop, variety, location, or lot number.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Notifications</h3><span class="who">Everyone</span></div>
+        <p>A feed of everything that touches you: handovers addressed to you, things you did yourself, and every recall on the network regardless of whether it's yours — those never get filtered out.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="group">
+    <h2 class="group-title">Moving produce</h2>
+    <p class="group-sub">Getting a lot onto the chain, and passing it along.</p>
+    <div class="cards">
+
+      <div class="card">
+        <div class="card-head"><h3>Register Produce</h3><span class="who">Farmer</span></div>
+        <p>Harvest a new lot. Crop type and variety cascade — pick <em>Rice</em> and the variety list narrows to <em>Basmati</em>, not Alphonso or Nilgiri.</p>
+        <ul class="field-list">
+          <li>Crop type / variety</li>
+          <li>Quantity + unit</li>
+          <li>Price + currency</li>
+          <li>Quality grade</li>
+          <li>Storage conditions</li>
+          <li>Harvest / expiry date</li>
+          <li>Organic certified</li>
+          <li>Cold chain range (°C)</li>
+        </ul>
+        <div class="note">
+          <strong>On submit</strong>
+          Lands in your own Inventory immediately — the success screen says so and links straight there, plus the lot's own page and a printable label.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Lot page</h3><span class="who">Everyone</span></div>
+        <p>Every lot's full record, six tabs: <strong>Overview</strong> (who grew it, held by, cold chain range), <strong>Route</strong> (custody trail on a map), <strong>Timeline</strong>, <strong>Lineage</strong> (splits and merges as a graph), <strong>Cold chain</strong> (every temperature reading, excursions in red), and <strong>Actions</strong>.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Actions tab — handover</h3><span class="who">Custodian ↔ recipient</span></div>
+        <p>Custody never moves in one step. Whoever's holding a lot proposes a transfer; the header shows <em>Acting as: [your org]</em> the whole time so it's never ambiguous whose signature this is.</p>
+        <div class="flow">
+          <div class="flow-step"><span class="n">1</span> Holder picks <strong>Propose handover</strong>, names the recipient, signs.</div>
+          <div class="flow-step"><span class="n">2</span> Lot shows "Awaiting acceptance by [recipient]" — a visible custody gap, not a silent limbo.</div>
+          <div class="flow-step"><span class="n">3</span> Recipient signs in, opens the same lot's Actions tab, sees <strong>Accept handover</strong> waiting.</div>
+          <div class="flow-step"><span class="n">4</span> One signature later: "Held by" flips, the gap clears, verdict goes back to Verified.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Actions tab — everything else</h3><span class="who">Role-gated</span></div>
+        <p>The same tab surfaces different actions depending who's signed in: <strong>advance stage</strong>, <strong>record sensor reading</strong>, <strong>certify</strong>, <strong>inspect</strong>, <strong>split / merge</strong>, <strong>sell</strong>, <strong>recall</strong>, <strong>destroy</strong> — only the ones your role and your custody actually permit.</p>
+        <div class="note warn">
+          <strong>Recall</strong>
+          Flagging a lot's root propagates automatically through every split or merged descendant it ever became — you never chase down child lots by hand.
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="group">
+    <h2 class="group-title">Oversight & the public record</h2>
+    <p class="group-sub">What a regulator sees network-wide, and what a shopper sees with no account at all.</p>
+    <div class="cards">
+
+      <div class="card">
+        <div class="card-head"><h3>Regulator view</h3><span class="who">Admin</span></div>
+        <p>Network-wide, not lot-by-lot: recalls grouped by region, cold-chain breaches grouped by region. The view a regulator actually needs — where the problems are, not who has which lot.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Public trace + printable label</h3><span class="who">No sign-in</span></div>
+        <p>Every lot has a QR code. Scanning it — or opening <span class="path">Public trace</span> from any lot page — opens a page with no login: a verdict banner (Verified / Caution / Unsafe) up top, warnings underneath if any, then provenance, certifications, and the full journey.</p>
+        <p>The <span class="path">Printable label</span> is the same QR code plus lot number, origin, and storage window, laid out for a physical pack.</p>
+      </div>
+
+    </div>
+  </section>
+
+</div>
