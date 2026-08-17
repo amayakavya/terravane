@@ -9,6 +9,25 @@ const NS = "http://www.w3.org/2000/svg";
  * one moving north. At the scale of a single country that is close enough to the
  * truth, and it needs no projection library.
  */
+function fitBounds(bounds, width, height, pad = 26) {
+  const { west, east, south, north } = bounds;
+  const midLat = (south + north) / 2;
+
+  const kx = Math.cos((midLat * Math.PI) / 180);
+  const spanX = (east - west) * kx;
+  const spanY = north - south;
+  const scale = Math.min((width - pad * 2) / spanX, (height - pad * 2) / spanY);
+
+  const offsetX = (width - spanX * scale) / 2;
+  const offsetY = (height - spanY * scale) / 2;
+
+  const project = (lat, lon) => [offsetX + (lon - west) * kx * scale, offsetY + (north - lat) * scale];
+  project.scale = scale;
+  project.kx = kx;
+  project.bounds = bounds;
+  return project;
+}
+
 function fit(points, width, height, pad = 26, minSpan = 1.2) {
   let west = Infinity;
   let east = -Infinity;
@@ -34,19 +53,52 @@ function fit(points, width, height, pad = 26, minSpan = 1.2) {
     north = midLat + minSpan / 2;
   }
 
-  const kx = Math.cos((midLat * Math.PI) / 180);
-  const spanX = (east - west) * kx;
-  const spanY = north - south;
-  const scale = Math.min((width - pad * 2) / spanX, (height - pad * 2) / spanY);
+  return fitBounds({ west, east, south, north }, width, height, pad);
+}
 
-  const offsetX = (width - spanX * scale) / 2;
-  const offsetY = (height - spanY * scale) / 2;
+// The country's real extent, not wherever the seeded participants happen to
+// sit — Jammu & Kashmir has no enrolled participant in the demo data, and a
+// data-fitted viewport was cropping it out of the network map entirely
+// because nothing north of Karnal ever pulled the frame up that far.
+const INDIA_BOUNDS = { west: 67.5, east: 98, south: 6.5, north: 36.5 };
 
-  const project = (lat, lon) => [offsetX + (lon - west) * kx * scale, offsetY + (north - lat) * scale];
-  project.scale = scale;
-  project.kx = kx;
-  project.bounds = { west, east, south, north };
-  return project;
+/**
+ * Nudge points that would otherwise land on top of each other apart, just
+ * enough to read as separate markers. Runs after projection, in pixel space,
+ * so it has no notion of geography — two cities 3km apart and two readings
+ * logged at the same spot are both just "too close to tell apart" here.
+ */
+function declutter(points, minGap = 15, passes = 4) {
+  for (let pass = 0; pass < passes; pass++) {
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        const a = points[i];
+        const b = points[j];
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let dist = Math.hypot(dx, dy);
+        if (dist < 0.5) {
+          // Exactly coincident: nothing to push along, so pick a direction —
+          // offset by index so three-or-more stacked points fan out rather
+          // than two of them landing on the same nudge.
+          const angle = (j * 2.4) % (Math.PI * 2);
+          dx = Math.cos(angle);
+          dy = Math.sin(angle);
+          dist = 1;
+        }
+        if (dist < minGap) {
+          const push = (minGap - dist) / 2;
+          const ux = dx / dist;
+          const uy = dy / dist;
+          a.x -= ux * push;
+          a.y -= uy * push;
+          b.x += ux * push;
+          b.y += uy * push;
+        }
+      }
+    }
+  }
+  return points;
 }
 
 function node(parent, tag, attrs) {
@@ -203,29 +255,37 @@ export function journeyMap(stops, readings = [], { width = 640, height = 380, mi
     node(svg, "circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: style.r, fill: style.fill, stroke: style.stroke });
   }
 
-  if (located.length > 1) {
+  // Two custody stops close enough to fall on the same pixel — a processor
+  // and a distributor headquartered in the same city, say — would otherwise
+  // print as a single dot with the route line vanishing into it. Spread the
+  // stops themselves apart; the telemetry trail underneath stays exactly
+  // where it was recorded, since nudging it would misstate the reading.
+  const stopMarks = located.map((stop, i) => {
+    const [x, y] = project(stop.lat, stop.lon);
+    return { stop, x, y, kind: i === 0 ? "origin" : i === located.length - 1 ? "current" : "handover" };
+  });
+  declutter(stopMarks, 20);
+
+  if (stopMarks.length > 1) {
     let d = "";
-    located.forEach((stop, i) => {
-      const [x, y] = project(stop.lat, stop.lon);
-      d += `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    stopMarks.forEach((m, i) => {
+      d += `${i === 0 ? "M" : "L"}${m.x.toFixed(1)},${m.y.toFixed(1)}`;
     });
     node(svg, "path", { d, fill: "none", stroke: "#006947", "stroke-width": "1.6", "stroke-dasharray": "5 4", opacity: "0.75" });
   }
 
   const label = makeLabeller(svg, width, height);
-  located.forEach((stop, i) => {
-    const [x, y] = project(stop.lat, stop.lon);
-    const kind = i === 0 ? "origin" : i === located.length - 1 ? "current" : "handover";
-    const style = MARKER[kind];
+  stopMarks.forEach((m) => {
+    const style = MARKER[m.kind];
     node(svg, "circle", {
-      cx: x.toFixed(1),
-      cy: y.toFixed(1),
+      cx: m.x.toFixed(1),
+      cy: m.y.toFixed(1),
       r: style.r,
       fill: style.fill,
       stroke: style.stroke,
       "stroke-width": "1.5"
     });
-    if (stop.label) label(x, y, stop.label, { gap: style.r + 5 });
+    if (m.stop.label) label(m.x, m.y, m.stop.label, { gap: style.r + 5 });
   });
 
   scaleBar(svg, project, width, height);
@@ -241,7 +301,9 @@ export function networkMap(participants, { width = 960, height = 470 } = {}) {
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.setAttribute("class", "figure map rounded-lg");
 
-  const project = fit(located, width, height, 34, 3);
+  // The whole country's frame, not just wherever these participants happen to
+  // be — see INDIA_BOUNDS.
+  const project = fitBounds(INDIA_BOUNDS, width, height, 34);
   drawLand(svg, project, width, height);
 
   const ROLE_COLOUR = {
@@ -255,25 +317,29 @@ export function networkMap(participants, { width = 960, height = 470 } = {}) {
     admin: "#6e7a72"
   };
 
-  for (const p of located) {
+  // Project once, then spread out anything sitting on top of a neighbour —
+  // two head offices in the same city are common in this data — so every
+  // marker and its label stay reachable rather than fused into one blob.
+  const marks = located.map((p) => {
     const [x, y] = project(p.lat, p.lon);
-    const primary = p.roles.find((r) => ROLE_COLOUR[r]) ?? "admin";
-    const colour = p.active ? ROLE_COLOUR[primary] : "#a13a2c";
-    const r = 3.5 + Math.min(p.holding, 6) * 0.9;
+    return { p, x, y, r: 3.5 + Math.min(p.holding, 6) * 0.9 };
+  });
+  declutter(marks, 16);
 
-    node(svg, "circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: r + 4, fill: colour, opacity: "0.12" });
-    node(svg, "circle", { cx: x.toFixed(1), cy: y.toFixed(1), r, fill: colour, stroke: "#ffffff", "stroke-width": "1.2" });
+  for (const m of marks) {
+    const primary = m.p.roles.find((r) => ROLE_COLOUR[r]) ?? "admin";
+    const colour = m.p.active ? ROLE_COLOUR[primary] : "#a13a2c";
+    node(svg, "circle", { cx: m.x.toFixed(1), cy: m.y.toFixed(1), r: m.r + 4, fill: colour, opacity: "0.12" });
+    node(svg, "circle", { cx: m.x.toFixed(1), cy: m.y.toFixed(1), r: m.r, fill: colour, stroke: "#ffffff", "stroke-width": "1.2" });
   }
 
   // Labels come after every marker so none is drawn over, and the busiest nodes
   // claim their space first.
   const label = makeLabeller(svg, width, height);
-  const byImportance = [...located].sort((a, b) => b.holding - a.holding);
+  const byImportance = [...marks].sort((a, b) => b.p.holding - a.p.holding);
   let dropped = 0;
-  for (const p of byImportance) {
-    const [x, y] = project(p.lat, p.lon);
-    const r = 3.5 + Math.min(p.holding, 6) * 0.9;
-    if (!label(x, y, p.name, { size: 9.5, fill: "#5b6058", gap: r + 5 })) dropped++;
+  for (const m of byImportance) {
+    if (!label(m.x, m.y, m.p.name, { size: 9.5, fill: "#5b6058", gap: m.r + 5 })) dropped++;
   }
   if (dropped) {
     const note = node(svg, "text", { x: width - 14, y: 20, fill: "#6e7a72", "font-size": "9", "text-anchor": "end" });
