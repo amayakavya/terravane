@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { contracts, RPC_URL, wallet } from "../scripts/lib/chain.js";
+import { advanceRoute, clearRoute, getRoute, setRoute } from "./db.js";
 
 /// The server holds development private keys so the console can act as any
 /// participant without a browser wallet. That is only ever acceptable against a
@@ -14,7 +15,7 @@ export function signingEnabled() {
   }
 }
 
-export function mountActions(app, { deployment, provider, indexer, documents }) {
+export function mountActions(app, { deployment, provider, indexer, documents, db }) {
   const roster = deployment.participants;
 
   function signerFor(identifier) {
@@ -43,13 +44,6 @@ export function mountActions(app, { deployment, provider, indexer, documents }) 
       res.json({ ok: true, ...result });
     } catch (err) {
       if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
-      // A rejected send leaves the cached nonce ahead of the chain; drop it so the
-      // next action re-reads rather than replaying a number the node has seen.
-      try {
-        signerFor(req.body?.as).signer.reset();
-      } catch {
-        // no identifiable signer on this request
-      }
       res.status(400).json({ error: explain(err, deployment) });
     }
   };
@@ -116,14 +110,58 @@ export function mountActions(app, { deployment, provider, indexer, documents }) 
     );
   }));
 
-  app.post("/api/actions/batches/:id/accept", action(async (req) => {
+  /// A plan is nothing but the first hop of an ordinary transfer, remembered. It
+  /// buys nobody's signature in advance — accept still has to happen, at every
+  /// step, by the party actually holding the lot at the time.
+  app.post("/api/actions/batches/:id/route", action(async (req) => {
     const { registry } = boundContracts(req.body.as);
-    return settle(registry.acceptTransfer(Number(req.params.id), req.body.geohash ?? ""));
+    const id = Number(req.params.id);
+    const steps = req.required("steps")
+      .map((s) => String(s).trim())
+      .filter(Boolean)
+      .map((s) => signerFor(s).participant.address);
+    if (!steps.length) throw new HttpError(400, "a route needs at least one stop");
+
+    const receipt = await settle(
+      registry.proposeTransfer(id, steps[0], req.body.geohash ?? "", req.body.note || "planned route", ethers.id(`route:${id}:0`))
+    );
+    setRoute(db, id, steps, req.body.as);
+    return { ...receipt, route: getRoute(db, id) };
+  }));
+
+  app.post("/api/actions/batches/:id/accept", action(async (req) => {
+    const id = Number(req.params.id);
+    const { registry } = boundContracts(req.body.as);
+    return settle(registry.acceptTransfer(id, req.body.geohash ?? ""));
+  }));
+
+  /// A route plan does not skip the holder's own work — it just tells them
+  /// where to send it once they're done. Accepting no longer forwards on its
+  /// own; this is its own deliberate action, so a processor can grade, tag or
+  /// certify a lot before choosing to move it on.
+  app.post("/api/actions/batches/:id/route/continue", action(async (req) => {
+    const id = Number(req.params.id);
+    const { registry } = boundContracts(req.body.as);
+    const route = getRoute(db, id);
+    if (!route) throw new HttpError(400, "this lot has no planned route");
+    if (route.nextIndex >= route.steps.length) throw new HttpError(400, "the planned route is already complete");
+
+    const to = route.steps[route.nextIndex];
+    const receipt = await settle(
+      registry.proposeTransfer(id, to, req.body.geohash ?? "", req.body.note || "continuing planned route", ethers.id(`route:${id}:${route.nextIndex}`))
+    );
+    const remaining = advanceRoute(db, id);
+    return { ...receipt, forwardedTo: to, routeComplete: !remaining };
   }));
 
   app.post("/api/actions/batches/:id/cancel", action(async (req) => {
+    const id = Number(req.params.id);
     const { registry } = boundContracts(req.body.as);
-    return settle(registry.cancelTransfer(Number(req.params.id)));
+    const receipt = await settle(registry.cancelTransfer(id));
+    // A rejected hop is the plan failing, not the plan continuing without its
+    // author's say-so — clear it so custody sits with the farmer, plainly.
+    clearRoute(db, id);
+    return receipt;
   }));
 
   app.post("/api/actions/batches/:id/stage", action(async (req) => {

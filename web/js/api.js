@@ -41,6 +41,9 @@ export const api = {
 
   create: (body) => post("/api/actions/batches", body),
   transfer: (id, body) => post(`/api/actions/batches/${id}/transfer`, body),
+  route: (id, body) => post(`/api/actions/batches/${id}/route`, body),
+  continueRoute: (id, body) => post(`/api/actions/batches/${id}/route/continue`, body),
+  getRoute: (id) => get(`/api/batches/${id}/route`),
   accept: (id, body) => post(`/api/actions/batches/${id}/accept`, body),
   cancelTransfer: (id, body) => post(`/api/actions/batches/${id}/cancel`, body),
   advance: (id, body) => post(`/api/actions/batches/${id}/stage`, body),
@@ -109,10 +112,10 @@ export const STAGE_KEYS = [
 
 /** Which actions a role may even attempt, so the interface offers only those. */
 export const ROLE_ACTIONS = {
-  farmer: ["transfer", "accept", "cancel", "telemetry", "split", "recall", "destroy"],
-  processor: ["transfer", "accept", "cancel", "stage", "telemetry", "split", "recall", "destroy"],
-  distributor: ["transfer", "accept", "cancel", "stage", "telemetry", "destroy"],
-  retailer: ["transfer", "accept", "cancel", "stage", "telemetry", "sell", "destroy"],
+  farmer: ["transfer", "route", "accept", "cancel", "telemetry", "split", "recall", "destroy"],
+  processor: ["transfer", "route", "accept", "cancel", "stage", "telemetry", "split", "recall", "destroy"],
+  distributor: ["transfer", "route", "accept", "cancel", "stage", "telemetry", "destroy"],
+  retailer: ["transfer", "route", "accept", "cancel", "stage", "telemetry", "sell", "destroy"],
   certifier: ["certify"],
   inspector: ["inspect", "recall", "destroy"],
   oracle: ["telemetry"],

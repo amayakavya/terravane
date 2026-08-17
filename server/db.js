@@ -88,7 +88,56 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_batch ON events(batch_id);
 CREATE INDEX IF NOT EXISTS idx_events_block ON events(block DESC, log_index DESC);
+
+-- A farmer's (or whoever currently holds a lot's) declared shipping plan: the
+-- ordered addresses it should pass through next. This is intent, not a claim
+-- about the produce — every hop it describes is still individually proposed
+-- and countersigned on-chain when it happens, so nothing trust-critical
+-- depends on the plan surviving a wipe. It rebuilds as empty, same as the
+-- rest of this file, which is correct: a plan written against last session's
+-- batch #6 has nothing to say about whatever lot becomes #6 next time.
+CREATE TABLE IF NOT EXISTS routes (
+  batch_id   INTEGER PRIMARY KEY,
+  steps      TEXT NOT NULL,
+  next_index INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
 `;
+
+/** The plan for a lot, with steps parsed back into an array. Null if none is set. */
+export function getRoute(db, batchId) {
+  const row = db.prepare("SELECT * FROM routes WHERE batch_id = ?").get(batchId);
+  if (!row) return null;
+  return { batchId: row.batch_id, steps: JSON.parse(row.steps), nextIndex: row.next_index, createdBy: row.created_by, createdAt: row.created_at };
+}
+
+/** Replace whatever plan a lot had (there is only ever one) with a fresh one, one step in. */
+export function setRoute(db, batchId, steps, createdBy) {
+  db.prepare(`
+    INSERT INTO routes(batch_id, steps, next_index, created_by, created_at)
+    VALUES(@batchId, @steps, 1, @createdBy, @createdAt)
+    ON CONFLICT(batch_id) DO UPDATE SET
+      steps = excluded.steps, next_index = 1, created_by = excluded.created_by, created_at = excluded.created_at
+  `).run({ batchId, steps: JSON.stringify(steps), createdBy, createdAt: Math.floor(Date.now() / 1000) });
+}
+
+/** Move the plan on by one hop, or clear it if that was the last one. Returns the plan, or null if it's done. */
+export function advanceRoute(db, batchId) {
+  const route = getRoute(db, batchId);
+  if (!route) return null;
+  const nextIndex = route.nextIndex + 1;
+  if (nextIndex >= route.steps.length) {
+    db.prepare("DELETE FROM routes WHERE batch_id = ?").run(batchId);
+    return null;
+  }
+  db.prepare("UPDATE routes SET next_index = ? WHERE batch_id = ?").run(nextIndex, batchId);
+  return { ...route, nextIndex };
+}
+
+export function clearRoute(db, batchId) {
+  db.prepare("DELETE FROM routes WHERE batch_id = ?").run(batchId);
+}
 
 export function getMeta(db, key, fallback = null) {
   const row = db.prepare("SELECT value FROM meta WHERE key = ?").get(key);

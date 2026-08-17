@@ -118,12 +118,62 @@ function definition(pairs) {
   );
 }
 
-function overview(body) {
+/**
+ * Where a planned route actually stands, per stop — derived from who holds
+ * the lot right now and who it's pending with, not from the plan's own
+ * propose-counter. That counter only tracks what to send next; accepting a
+ * hop no longer forwards it in the same breath, so by the time a holder is
+ * looking at this, "next to propose" and "already accepted" are two
+ * different steps, not one.
+ */
+function routeStepStatus(route, b) {
+  const custodian = b.custodian?.address?.toLowerCase();
+  const pending = b.pendingCustodian?.address?.toLowerCase();
+  const reachedIndex = route.steps.findIndex((p) => p.address?.toLowerCase() === custodian);
+
+  return route.steps.map((p, i) => {
+    if (i === reachedIndex) return { name: p.name, tone: "good", label: t("act.routeHere") };
+    if (reachedIndex !== -1 && i < reachedIndex) return { name: p.name, tone: "good", label: t("trace.verified") };
+    if (pending && p.address?.toLowerCase() === pending) return { name: p.name, tone: "warn", label: t("act.routePending") };
+    return { name: p.name, tone: "neutral", label: t("act.routeUpcoming") };
+  });
+}
+
+/**
+ * The farmer's planned shipping route, laid out as a strip of stops: here
+ * now, done, awaiting acceptance, or not yet proposed. This is the answer to
+ * "where has my crop reached, where is it going" without opening every
+ * intermediate holder's own view of the lot.
+ */
+function routeStatusCard(route, b) {
+  const stops = routeStepStatus(route, b);
+  const last = stops.length - 1;
+  const steps = stops.map((s, i) =>
+    el("div", { class: "flex items-center gap-2.5 shrink-0" }, [
+      el("div", { class: "text-center" }, [
+        badge(s.name, s.tone),
+        el("p", { class: "font-label-sm text-[10px] tracking-widest uppercase text-on-surface-variant/60 mt-1", text: s.label })
+      ]),
+      i < last ? el("span", { class: "text-on-surface-variant/40 shrink-0", html: icon("arrow_forward", { size: 16 }) }) : null
+    ])
+  );
+  return card([
+    cardHeader(t("act.routePlanned")),
+    el("div", { class: "px-6 py-5 flex items-center gap-2.5 overflow-x-auto" }, steps)
+  ], "mb-6 rise-in");
+}
+
+async function overview(body) {
   const b = dossier.batch;
   const attrs = dossier.attributes;
   const certs = [...dossier.certifications, ...dossier.farmCertifications];
+  // Whoever planned this route — usually the farmer who will never hold the
+  // lot again after the first hop — otherwise has no way to see it move
+  // without opening every intermediate holder's Actions tab themselves.
+  const route = await api.getRoute(b.id).catch(() => null);
 
-  add(body, 
+  add(body,
+    route ? routeStatusCard(route, b) : null,
     el("div", { class: "grid gap-6 xl:grid-cols-[1.3fr_1fr] items-start" }, [
       el("div", { class: "grid gap-6" }, [
         card([
@@ -386,6 +436,11 @@ const ACTIONS = {
     fields: [["to", "act.recipient", "participant"], ["note", "act.note", "text"]],
     run: (id, body) => api.transfer(id, body)
   },
+  route: {
+    label: "act.route",
+    fields: [["steps", "act.routeSteps", "route"]],
+    run: (id, body) => api.route(id, body)
+  },
   accept: { label: "act.accept", fields: [], run: (id, body) => api.accept(id, body) },
   cancel: { label: "act.cancel", fields: [], run: (id, body) => api.cancelTransfer(id, body) },
   stage: { label: "act.stage", fields: [["stage", "act.stage", "stage"]], run: (id, body) => api.advance(id, body) },
@@ -458,6 +513,59 @@ function saleSlab(b, remaining) {
   ], "rise-in mb-6");
 }
 
+/**
+ * The farmer's plan for this lot, shown to whoever holds it now — with an
+ * explicit button to move it on. Accepting a handover no longer forwards it:
+ * a processor grades, tags, certifies, whatever their part of the work is,
+ * and only sends it on when they choose to, by pressing this.
+ */
+function routeSlab(b, route, mine) {
+  const stops = routeStepStatus(route, b);
+  const last = stops.length - 1;
+  const strip = stops.map((s, i) =>
+    el("div", { class: "flex items-center gap-2 shrink-0" }, [
+      el("div", { class: "text-center" }, [
+        badge(s.name, s.tone),
+        el("p", { class: "font-label-sm text-[10px] tracking-widest uppercase text-on-surface-variant/60 mt-1", text: s.label })
+      ]),
+      i < last ? el("span", { class: "text-on-surface-variant/40 shrink-0", html: icon("arrow_forward", { size: 14 }) }) : null
+    ])
+  );
+
+  const canContinue = mine && route.nextIndex < route.steps.length;
+  const result = el("div", { class: "mt-4" });
+  const children = [
+    el("div", { class: "flex items-center gap-2 overflow-x-auto px-6 py-5" }, strip)
+  ];
+
+  if (canContinue) {
+    const next = route.steps[route.nextIndex];
+    const submit = button(t("act.routeContinue", { to: next.name }), { tone: "primary" });
+    submit.addEventListener("click", async () => {
+      submit.disabled = true;
+      clear(result);
+      try {
+        const receipt = await api.continueRoute(b.id, { as: me.address });
+        toast(t("act.routeForwarded", { to: next.name }), "good");
+        add(result, notice(`${t("act.routeForwarded", { to: next.name })}\n${t("act.committed", { block: receipt.block, gas: Number(receipt.gasUsed).toLocaleString() })}`, "good"));
+        await reload();
+        tab = "actions";
+      } catch (err) {
+        add(result, notice(err.message, "bad"));
+      } finally {
+        submit.disabled = false;
+      }
+    });
+    children.push(el("div", { class: "px-6 pb-5 -mt-2" }, [
+      el("p", { class: "font-body-sm text-body-sm text-on-surface-variant mb-3", text: t("act.routeContinueNote") }),
+      submit,
+      result
+    ]));
+  }
+
+  return card([cardHeader(t("act.routePlanned")), ...children], "rise-in mb-6");
+}
+
 async function actions(body) {
   const b = dossier.batch;
   const mine = b.custodian?.address?.toLowerCase() === me.address.toLowerCase();
@@ -469,10 +577,13 @@ async function actions(body) {
     add(body, saleSlab(b, remaining));
   }
 
+  const route = await api.getRoute(b.id).catch(() => null);
+  if (route) add(body, routeSlab(b, route, mine));
+
   // Only offer what this participant could actually do with this lot. The chain
   // refuses the rest anyway; presenting them would just be a menu of failures.
   const available = allowedActions(roles).filter((key) => {
-    if (["transfer", "stage", "split", "sell"].includes(key)) return mine && !b.recalled && b.stage < 5;
+    if (["transfer", "route", "stage", "split", "sell"].includes(key)) return mine && !b.recalled && b.stage < 5;
     if (key === "accept") return offered;
     if (key === "cancel") return Boolean(b.pendingCustodian) && (mine || offered);
     if (key === "telemetry") return mine || roles.includes("oracle");
@@ -522,6 +633,10 @@ async function actions(body) {
         const choice = fields.querySelector(`[data-scheme-select="${name}"]`);
         const custom = fields.querySelector(`[data-scheme-custom="${name}"]`);
         value = choice.value === "custom" ? custom.value : choice.value;
+      } else if (kind === "route") {
+        value = [1, 2, 3]
+          .map((i) => fields.querySelector(`[data-route-step="${name}-${i}"]`)?.value)
+          .filter(Boolean);
       } else {
         const node = fields.querySelector(`[name="${name}"]`);
         value = node.value;
@@ -548,9 +663,14 @@ async function actions(body) {
       // actionable, like which lots a recall reached.
       const detail =
         `${t("act.committed", { block: receipt.block, gas: Number(receipt.gasUsed).toLocaleString() })}\n${receipt.txHash}`;
+      const forwardedName = receipt.forwardedTo
+        ? (participants.find((p) => p.address.toLowerCase() === receipt.forwardedTo.toLowerCase())?.name ?? receipt.forwardedTo)
+        : null;
       const summary =
         `${t(spec.label)} — ${t("act.done")}` +
-        (receipt.propagated?.length ? `\n${t("act.recalled", { count: `${receipt.propagated.length}`, list: receipt.propagated.map((n) => `#${n}`).join(", ") })}` : "");
+        (receipt.propagated?.length ? `\n${t("act.recalled", { count: `${receipt.propagated.length}`, list: receipt.propagated.map((n) => `#${n}`).join(", ") })}` : "") +
+        (forwardedName ? `\n${t("act.routeForwarded", { to: forwardedName })}` : "") +
+        (receipt.route && !forwardedName ? `\n${t("act.routeStarted", { to: participants.find((p) => p.address.toLowerCase() === receipt.route.steps[0]?.toLowerCase())?.name ?? receipt.route.steps[0] })}` : "");
       add(result, notice(`${summary}\n${detail}`, "good"));
       // The reload below rebuilds this whole tab, which would otherwise wipe the
       // notice above before anyone reads it — the toast lives outside this tab
@@ -587,6 +707,23 @@ function control(name, kind, participants, batch) {
       (p) => p.active && p.roles.some((r) => ["farmer", "processor", "distributor", "retailer"].includes(r)) && p.address !== batch.custodian?.address
     );
     return select({ name }, holders.map((p) => el("option", { value: p.address, text: `${p.name} (${p.roles.join("/")})` })));
+  }
+  if (kind === "route") {
+    // Up to three stops is enough for every real shape this chain models
+    // (farmer, an optional processor, a distributor, a retailer) without
+    // building a full add/remove list widget for it.
+    const holders = participants.filter(
+      (p) => p.active && p.roles.some((r) => ["farmer", "processor", "distributor", "retailer"].includes(r)) && p.address !== batch.custodian?.address
+    );
+    const hopOptions = (placeholder) => [
+      el("option", { value: "", text: placeholder }),
+      ...holders.map((p) => el("option", { value: p.address, text: `${p.name} (${p.roles.join("/")})` }))
+    ];
+    return el("div", { class: "grid gap-2" }, [
+      select({ "data-route-step": `${name}-1` }, hopOptions(t("act.routeHop1"))),
+      select({ "data-route-step": `${name}-2` }, hopOptions(t("act.routeHop2"))),
+      select({ "data-route-step": `${name}-3` }, hopOptions(t("act.routeHop3")))
+    ]);
   }
   if (kind === "stage") {
     return select({ name }, STAGE_KEYS.slice(0, 5).map((key, i) => el("option", { value: String(i), text: t(key) })));

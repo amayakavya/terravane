@@ -10,6 +10,10 @@ import { lotTable } from "./lot-table.js";
 
 const main = document.getElementById("main");
 let held = [];
+// Lots this participant originated (grew, or minted) but has already handed
+// off — no longer their responsibility to act on, but a farmer who planned a
+// route watches this list, not the one above, once a lot leaves their hands.
+let sent = [];
 let query = "";
 let flag = "";
 
@@ -27,7 +31,12 @@ async function start() {
   if (!me) return;
 
   await page(main, async () => {
-    held = await api.batches({ custodian: me.address, limit: 500 });
+    const [heldRes, originRes] = await Promise.all([
+      api.batches({ custodian: me.address, limit: 500 }),
+      api.batches({ origin: me.address, limit: 500 })
+    ]);
+    held = heldRes;
+    sent = originRes.filter((b) => b.custodian?.address?.toLowerCase() !== me.address.toLowerCase() && !isClosed(b));
     render();
   });
 }
@@ -81,7 +90,15 @@ function render() {
         )
       ]),
       el("div", { id: "rows" }, lotTable(rows, { onEmpty: t("inv.empty") }))
-    ], "rise-in")
+    ], "rise-in"),
+
+    sent.length
+      ? card([
+          cardHeader(t("inv.sent")),
+          el("p", { class: "px-6 pt-4 -mb-1 font-body-sm text-body-sm text-on-surface-variant", text: t("inv.sentNote") }),
+          lotTable(sent)
+        ], "mt-6 rise-in-delay")
+      : null
   );
 }
 

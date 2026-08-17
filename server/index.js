@@ -3,7 +3,7 @@ import express from "express";
 import QRCode from "qrcode";
 import { contracts, provider, readDeployment, ROOT, RPC_URL, STAGE_NAMES } from "../scripts/lib/chain.js";
 import { decodeGeohash } from "../scripts/lib/geohash.js";
-import { getMeta, openDatabase } from "./db.js";
+import { getMeta, getRoute, openDatabase } from "./db.js";
 import { Indexer } from "./indexer.js";
 import { mountActions, signingEnabled } from "./actions.js";
 import { DocumentStore, mountDocuments } from "./documents.js";
@@ -313,6 +313,10 @@ app.get("/api/batches", (req, res) => {
     clauses.push("LOWER(custodian) = LOWER(@custodian)");
     params.custodian = req.query.custodian;
   }
+  if (req.query.origin) {
+    clauses.push("LOWER(origin_farm) = LOWER(@origin)");
+    params.origin = req.query.origin;
+  }
   const flag = req.query.flag;
   if (flag === "recalled") clauses.push("recalled = 1");
   if (flag === "breached") clauses.push("cold_chain_breached = 1");
@@ -360,7 +364,7 @@ app.get("/api/notifications", (req, res) => {
 
   const rows = db
     .prepare(`
-      SELECT e.* FROM events e
+      SELECT e.*, b.produce_type, b.variety, b.quantity, b.unit FROM events e
       LEFT JOIN batches b ON b.id = e.batch_id
       WHERE LOWER(e.actor) = @address
          OR LOWER(b.custodian) = @address
@@ -379,6 +383,12 @@ app.get("/api/notifications", (req, res) => {
         name: e.name,
         batchId: e.batch_id,
         actor: who(e.actor),
+        // A raw address in a custody event tells a farmer nothing about their
+        // own crop's journey — resolve who it moved from and to, same as
+        // every other participant-facing address in this API.
+        from: args.from ? who(args.from) : null,
+        to: args.to ? who(args.to) : null,
+        produce: e.produce_type ? { produceType: e.produce_type, variety: e.variety, quantity: e.quantity, unit: e.unit } : null,
         at: e.ts,
         txHash: e.tx_hash,
         args,
@@ -461,6 +471,12 @@ app.get("/api/qr/:id", async (req, res) => {
 
 mountDocuments(app, documents);
 mountActions(app, { deployment, provider: prov, indexer, db, documents });
+
+app.get("/api/batches/:id/route", (req, res) => {
+  const route = getRoute(db, Number(req.params.id));
+  if (!route) return res.json(null);
+  res.json({ ...route, steps: route.steps.map(who) });
+});
 
 app.use("/api", (_req, res) => res.status(404).json({ error: "no such endpoint" }));
 

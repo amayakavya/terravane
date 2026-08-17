@@ -6,3 +6,5 @@ deployments/
 types/
 .DS_Store
 *.log
+tools/foundry/
+chain-state.json

@@ -56,9 +56,29 @@ async function start() {
   });
 }
 
+/**
+ * Custody events carry a from/to, and that is the whole story worth telling —
+ * "Ganga Rice Mills accepted from Sundar Farms" says where a crop actually is,
+ * where the raw event name and actor alone would not.
+ */
+function custodyLine(item) {
+  const produce = item.produce ? `${item.produce.produceType}${item.produce.variety ? ` · ${item.produce.variety}` : ""}` : null;
+  if (item.name === "TransferProposed" && item.from && item.to) {
+    return t("notif.custodyProposed", { produce: produce ?? t("lot.title"), from: item.from.name, to: item.to.name });
+  }
+  if (item.name === "TransferAccepted" && item.from && item.to) {
+    return t("notif.custodyAccepted", { produce: produce ?? t("lot.title"), from: item.from.name, to: item.to.name });
+  }
+  if (item.name === "TransferCancelled" && item.from) {
+    return t("notif.custodyCancelled", { produce: produce ?? t("lot.title"), from: item.from.name });
+  }
+  return null;
+}
+
 function row(item) {
   const shape = SHAPE[item.name] ?? { icon: "info", tone: "neutral", key: "notif.title" };
   const open = item.batchId ? () => { location.href = `/lot.html?id=${item.batchId}`; } : null;
+  const line = custodyLine(item);
 
   return el("div", {
     class: `flex items-start gap-4 px-6 py-4 ${open ? "cursor-pointer hover:bg-surface-container/50 transition-colors" : ""}`,
@@ -71,7 +91,7 @@ function row(item) {
         item.batchId ? badge(`#${item.batchId}`) : null,
         item.mine ? badge(t("notif.yours"), "info") : null
       ]),
-      el("p", { class: "font-body-sm text-[12px] text-on-surface-variant mt-0.5", text: `${item.name} · ${item.actor?.name ?? "-"}` }),
+      el("p", { class: "font-body-sm text-[12px] text-on-surface mt-0.5", text: line ?? `${item.name} · ${item.actor?.name ?? "-"}` }),
       item.args?.reason ? el("p", { class: "font-body-sm text-[12px] text-on-surface-variant/80 mt-1", text: item.args.reason }) : null
     ]),
     el("p", { class: "font-label-sm text-[11px] text-on-surface-variant/70 whitespace-nowrap", text: `${ago(item.at)} · ${when(item.at)}` })
