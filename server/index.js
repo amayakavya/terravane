@@ -3,13 +3,13 @@ import express from "express";
 import QRCode from "qrcode";
 import { contracts, loadArtifact, provider, readDeployment, ROOT, RPC_URL, STAGE_NAMES } from "../scripts/lib/chain.js";
 import { decodeGeohash } from "../scripts/lib/geohash.js";
-import { getMeta, getRoute, openDatabase, setMeta } from "./db.js";
+import { getMeta, getRoute, openDatabase } from "./db.js";
 import { Indexer } from "./indexer.js";
 import { mountActions, signingEnabled } from "./actions.js";
 import { DocumentStore, mountDocuments } from "./documents.js";
 import { attachmentName, render } from "./render.js";
 import { briefingLines, deskBriefing } from "./desk.js";
-import { aiEnabled, aiStatus, getAiConfig, setAiConfig, summariseDesk } from "./ai.js";
+import { aiEnabled, aiStatus, summariseDesk } from "./ai.js";
 
 const PORT = Number(process.env.PORT ?? 4300);
 const deployment = readDeployment();
@@ -19,16 +19,6 @@ const { registry } = contracts(prov, deployment);
 
 const documents = new DocumentStore(db);
 const indexer = new Indexer({ db, provider: prov, deployment });
-
-// Whatever an admin last saved from the settings page, applied before this
-// node answers its first request — otherwise every restart would quietly
-// fall back to the environment again and the saved choice would look like it
-// hadn't stuck.
-setAiConfig({
-  host: getMeta(db, "ai.host", null),
-  model: getMeta(db, "ai.model", null),
-  enabled: JSON.parse(getMeta(db, "ai.enabled", "null"))
-});
 
 const app = express();
 app.use(express.json({ limit: "256kb" }));
@@ -374,40 +364,6 @@ app.post("/api/participants/:address/contact", (req, res) => {
   db.prepare("UPDATE participants SET email = ?, phone = ? WHERE address = ?").run(email, phone, address);
   participants();
   res.json({ ok: true, email, phone });
-});
-
-function requireAdmin(req, res) {
-  const participant = who(String(req.body.as ?? req.query.as ?? ""));
-  if (!participant?.roles?.includes("admin")) {
-    res.status(403).json({ error: "only an admin can do this" });
-    return null;
-  }
-  return participant;
-}
-
-// Which local model daemon this node talks to, if any — never a vendor key,
-// because the node never talks to anything off this machine. Reading this
-// needs no role: the console shows it on the desk briefing to everyone
-// already. Changing it is admin-only and takes effect immediately, no
-// restart, because the whole point is letting the person actually running
-// this checkout point it at whatever they have installed.
-app.get("/api/admin/ai-config", (_req, res) => {
-  res.json(getAiConfig());
-});
-
-app.post("/api/admin/ai-config", (req, res) => {
-  if (!requireAdmin(req, res)) return;
-
-  const host = (req.body.host ?? "").trim() || null;
-  const model = (req.body.model ?? "").trim() || null;
-  const enabled = req.body.enabled === null || req.body.enabled === undefined ? null : Boolean(req.body.enabled);
-
-  setMeta(db, "ai.host", host === null ? "" : host);
-  setMeta(db, "ai.model", model === null ? "" : model);
-  setMeta(db, "ai.enabled", JSON.stringify(enabled));
-  setAiConfig({ host, model, enabled });
-
-  res.json(getAiConfig());
 });
 
 app.get("/api/batches", (req, res) => {
