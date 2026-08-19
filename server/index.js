@@ -38,8 +38,8 @@ function who(address) {
   if (!address || address === "0x0000000000000000000000000000000000000000") return null;
   const row = participantCache.get(address.toLowerCase()) ?? participants().find((p) => p.address.toLowerCase() === address.toLowerCase());
   return row
-    ? { address: row.address, name: row.name, location: row.location, roles: row.role_names.split(",").filter(Boolean), active: !!row.active, lat: row.lat, lon: row.lon }
-    : { address, name: null, location: null, roles: [], active: null, lat: null, lon: null };
+    ? { address: row.address, name: row.name, location: row.location, roles: row.role_names.split(",").filter(Boolean), active: !!row.active, lat: row.lat, lon: row.lon, email: row.email, phone: row.phone }
+    : { address, name: null, location: null, roles: [], active: null, lat: null, lon: null, email: null, phone: null };
 }
 
 function shapeBatch(row) {
@@ -291,9 +291,33 @@ app.get("/api/participants", (_req, res) => {
       active: !!p.active,
       lat: p.lat,
       lon: p.lon,
+      email: p.email,
+      phone: p.phone,
       holding: db.prepare("SELECT COUNT(*) AS n FROM batches WHERE custodian = ?").get(p.address).n
     }))
   );
+});
+
+// Off-chain and self-service: a participant sets how they want to be reached,
+// and only for their own address. This never touches the chain, so it works
+// even when TERRAVANE_SIGNING is off — there is nothing here for a dev key
+// to sign, only a claim about how to reach the person who is already signed
+// in as this address.
+app.post("/api/participants/:address/contact", (req, res) => {
+  const address = req.params.address;
+  const as = String(req.body.as ?? "");
+  if (!as || as.toLowerCase() !== address.toLowerCase()) {
+    return res.status(403).json({ error: "you can only edit your own contact details" });
+  }
+  if (!participantCache.has(address.toLowerCase()) && !participants().some((p) => p.address.toLowerCase() === address.toLowerCase())) {
+    return res.status(404).json({ error: "unknown participant" });
+  }
+
+  const email = (req.body.email ?? "").trim() || null;
+  const phone = (req.body.phone ?? "").trim() || null;
+  db.prepare("UPDATE participants SET email = ?, phone = ? WHERE address = ?").run(email, phone, address);
+  participants();
+  res.json({ ok: true, email, phone });
 });
 
 app.get("/api/batches", (req, res) => {
@@ -451,7 +475,12 @@ app.get("/api/trace/:id", async (req, res) => {
     attributes: data.attributes,
     journey,
     journeyHandovers: data.handovers,
-    certifications: [...data.certifications, ...data.farmCertifications].filter((c) => c.active),
+    // Tagged, because a farm-level certification is a claim about the farm and
+    // not about this lot — a distinction the consumer page spells out.
+    certifications: [
+      ...data.certifications.map((c) => ({ ...c, scope: "lot" })),
+      ...data.farmCertifications.map((c) => ({ ...c, scope: "farm" }))
+    ].filter((c) => c.active),
     telemetry: data.telemetry,
     lineage: lineage(id, 40),
     recall: data.recall

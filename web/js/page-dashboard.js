@@ -1,5 +1,5 @@
 import { api, CUSTODY_ROLES } from "./api.js";
-import { add, card, cardHeader, clear, el, icon, isClosed, mount, page, renderShell, t } from "./ui.js";
+import { add, card, cardHeader, clear, el, icon, isClosed, mount, page, renderShell, t, timeOfDay } from "./ui.js";
 import { lotTable, statTile } from "./lot-table.js";
 import { networkMap } from "./map.js";
 
@@ -170,7 +170,7 @@ function hero(me, counts) {
     el("div", { class: "absolute inset-0 grain pointer-events-none" }),
     el("div", { class: "relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-8" }, [
       el("div", { class: "max-w-xl" }, [
-        el("p", { class: "font-serif-display text-[30px] lg:text-[34px] leading-[1.15] text-white mb-2", text: t("dash.greeting", { name: me.name }) }),
+        el("p", { class: "font-serif-display text-[30px] lg:text-[34px] leading-[1.15] text-white mb-2", text: t(`dash.greeting.${timeOfDay()}`, { name: me.name }) }),
         el("p", { class: "font-body-md text-body-md text-gold-soft/70 mb-7", text: me.location || "" }),
         el("div", { class: "flex flex-wrap items-center gap-3" },
           shortcuts.map((item) =>

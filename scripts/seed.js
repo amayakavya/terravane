@@ -9,7 +9,8 @@ import { DocumentStore } from "../server/documents.js";
 
 const deployment = readDeployment();
 const prov = provider();
-const documents = new DocumentStore(openDatabase());
+const db = openDatabase();
+const documents = new DocumentStore(db);
 
 const byName = new Map(deployment.participants.map((p) => [p.name, p]));
 
@@ -265,6 +266,36 @@ async function main() {
   const total = Number(await sundar.registry.batchCount());
   console.log(`\nseeded ${txCount} transactions, ${total} batches on chain`);
   console.log(`recalled tea root #${tea}, cold-chain breach on mango #${mango}, open handover on #${tomatoes}`);
+
+  seedContacts();
+}
+
+/// Off-chain, self-service contact details, written straight into the index —
+/// nothing here is a claim the chain makes, so there is no contract call to
+/// wait on. Real participants set this for themselves from the console; this
+/// is only so the feature isn't empty the first time the demo shows it.
+///
+/// `stack.js` runs deploy, then this script, then starts the server — so the
+/// participants table is still empty when this runs on a fresh stack. An
+/// UPDATE would silently touch nothing; this upserts a row keyed on address
+/// alone, and the indexer's own upsert (which never touches these two
+/// columns) fills in the rest once it starts.
+function seedContacts() {
+  const set = db.prepare(`
+    INSERT INTO participants(address, email, phone) VALUES(?, ?, ?)
+    ON CONFLICT(address) DO UPDATE SET email = excluded.email, phone = excluded.phone
+  `);
+  const rows = [
+    ["Sundar Farms", "harvest@sundarfarms.example", "+91 98180 22341"],
+    ["Anand Growers Collective", "office@anandgrowers.example", "+91 90210 55678"],
+    ["Konkan Mango Co-operative", "trade@konkanmango.example", "+91 98220 11987"],
+    ["Nilgiri Highland Estates", "estate@nilgirihighland.example", "+91 90480 33214"],
+    ["Ganga Rice Mills", "orders@gangaricemills.example", null],
+    ["Coldline Logistics", null, "+91 98330 44521"],
+    ["Fresh Bazaar", "produce@freshbazaar.example", "+91 90090 77612"]
+  ];
+  for (const [name, email, phone] of rows) set.run(byName.get(name).address, email, phone);
+  console.log(`seeded contact details for ${rows.length} participants`);
 }
 
 main().catch((err) => {

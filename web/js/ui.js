@@ -48,6 +48,14 @@ export const $ = (selector) => document.querySelector(selector);
 // Formatting
 // --------------------------------------------------------------------------
 
+/** Morning until noon, afternoon until 5pm, evening after — the visitor's own clock, not the server's. */
+export function timeOfDay() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "morning";
+  if (hour < 17) return "afternoon";
+  return "evening";
+}
+
 export function when(seconds) {
   if (!seconds) return "-";
   return new Date(Number(seconds) * 1000).toLocaleString(undefined, {
@@ -169,6 +177,69 @@ export function toast(message, tone = "good", ms = 5000) {
   host.appendChild(node);
   setTimeout(() => node.remove(), ms);
   return node;
+}
+
+/**
+ * A dialog over the page, mounted to document.body rather than the app root so
+ * a tab re-render underneath cannot tear it out from under the reader. Closes
+ * on Escape, on the backdrop, and on the close button; focus goes into the
+ * panel on open and back to whatever opened it on close, because a reader who
+ * opened this from the keyboard has to be able to get back out the same way.
+ */
+export function modal(title, children, { subtitle = null } = {}) {
+  const previouslyFocused = document.activeElement;
+  const titleId = `modal-title-${Math.random().toString(36).slice(2, 9)}`;
+
+  const closeButton = el("button", {
+    type: "button",
+    class: "shrink-0 rounded-lg p-1.5 text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors",
+    "aria-label": t("common.close"),
+    html: icon("close", { size: 18 })
+  });
+
+  const panel = el("div", {
+    class: "relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl border border-outline-variant/70 " +
+      "bg-surface-container-lowest shadow-lg rise-in",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": titleId
+  }, [
+    el("div", { class: "flex items-start justify-between gap-4 px-6 py-4 border-b border-outline-variant/60 sticky top-0 bg-surface-container-lowest z-10" }, [
+      el("div", { class: "min-w-0" }, [
+        el("h2", { id: titleId, class: "font-headline-md text-[15px] font-semibold text-on-surface", text: title }),
+        subtitle ? el("p", { class: "font-body-sm text-[12px] text-on-surface-variant mt-0.5", text: subtitle }) : null
+      ]),
+      closeButton
+    ]),
+    el("div", { class: "px-6 py-5 grid gap-5" }, children)
+  ]);
+
+  const backdrop = el("div", {
+    class: "fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4 sm:p-6 overflow-y-auto bg-primary-deep/40"
+  }, [panel]);
+
+  function close() {
+    document.removeEventListener("keydown", onKeydown, true);
+    backdrop.remove();
+    if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+  }
+
+  function onKeydown(e) {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  }
+
+  closeButton.addEventListener("click", close);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) close();
+  });
+  document.addEventListener("keydown", onKeydown, true);
+
+  document.body.append(backdrop);
+  closeButton.focus();
+  return close;
 }
 
 export function card(children, extra = "") {
@@ -384,10 +455,13 @@ export async function renderShell({ active, titleKey, title }) {
   <div class="h-px bg-white/10 mb-3"></div>
   <div class="flex items-center gap-3 px-3.5 py-2 mb-1">
     <div class="h-8 w-8 rounded-full bg-gold-soft/15 border border-gold-soft/30 text-gold-soft flex items-center justify-center font-serif-display text-sm shrink-0">${initials(participant.name)}</div>
-    <div class="leading-tight min-w-0">
+    <div class="leading-tight min-w-0 flex-1">
       <p class="font-body-sm text-body-sm text-gold-soft truncate">${participant.name}</p>
       <p class="font-label-sm text-[10px] tracking-widest uppercase text-gold-soft/50 truncate">${(participant.roles ?? []).join(", ")}</p>
     </div>
+    <button id="edit-contact-btn" type="button" class="shrink-0 p-1.5 rounded-lg text-gold-soft/50 hover:text-gold-soft hover:bg-white/5 transition-all" aria-label="${t("contact.edit")}">
+      ${icon("edit", { size: 15 })}
+    </button>
   </div>
   <button class="sign-out-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-gold-soft/50 hover:bg-error/10 hover:text-[#e2a396] transition-all" type="button">
     ${icon("logout", { size: 20 })}
@@ -449,6 +523,16 @@ export async function renderShell({ active, titleKey, title }) {
       location.href = "/index.html";
     })
   );
+
+  // Dynamic import, not a static one: contact.js imports back from this
+  // module, and a static cycle here would leave one side's exports
+  // undefined depending on which file the page happens to load first.
+  $("#edit-contact-btn")?.addEventListener("click", async () => {
+    const { openEditContact } = await import("./contact.js");
+    openEditContact(participant, (result) => {
+      session.set({ ...participant, email: result.email, phone: result.phone });
+    });
+  });
 
   paintChainState();
   setInterval(paintChainState, 8000);

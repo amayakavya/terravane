@@ -10,7 +10,28 @@ export function openDatabase(file = path.join(ROOT, "data", "index.db")) {
   const db = new Database(file);
   db.pragma("journal_mode = WAL");
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+/**
+ * Columns added after a database was first created. `CREATE TABLE IF NOT
+ * EXISTS` above never touches an existing table, so a column added here has
+ * to be added again by hand for anyone who already has a data/index.db on
+ * disk — this runs that ALTER, ignoring the error it throws once the column
+ * already exists.
+ */
+function migrate(db) {
+  for (const sql of [
+    "ALTER TABLE participants ADD COLUMN email TEXT",
+    "ALTER TABLE participants ADD COLUMN phone TEXT"
+  ]) {
+    try {
+      db.exec(sql);
+    } catch (err) {
+      if (!/duplicate column name/i.test(err.message)) throw err;
+    }
+  }
 }
 
 const SCHEMA = `
@@ -29,7 +50,11 @@ CREATE TABLE IF NOT EXISTS participants (
   roles      INTEGER,
   role_names TEXT,
   active     INTEGER,
-  registered_at INTEGER
+  registered_at INTEGER,
+  -- Self-declared, off-chain, editable only by the participant it belongs
+  -- to. The AccessRegistry contract knows nothing about either column.
+  email      TEXT,
+  phone      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS batches (
