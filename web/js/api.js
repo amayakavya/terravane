@@ -38,9 +38,16 @@ export const api = {
   events: (limit = 40) => get(`/api/events?limit=${limit}`),
   notifications: (address, limit = 40) => get(`/api/notifications?as=${address}&limit=${limit}`),
   document: (hash) => get(`/api/documents/${hash}`),
+  /** The desk briefing. `summarise: false` asks for the figures without the prose. */
+  desk: (address, { summarise = true } = {}) => get(`/api/desk?as=${address}${summarise ? "" : "&summarise=0"}`),
+
+  /** Printed documents are files, not JSON — these are hrefs, not fetches. */
+  invoiceUrl: (id, index) => `/api/batches/${id}/invoice/${index}`,
+  certificateUrl: (id, index) => `/api/batches/${id}/certificate/${index}`,
 
   create: (body) => post("/api/actions/batches", body),
   transfer: (id, body) => post(`/api/actions/batches/${id}/transfer`, body),
+  counter: (id, body) => post(`/api/actions/batches/${id}/counter`, body),
   route: (id, body) => post(`/api/actions/batches/${id}/route`, body),
   continueRoute: (id, body) => post(`/api/actions/batches/${id}/route/continue`, body),
   getRoute: (id) => get(`/api/batches/${id}/route`),
@@ -112,10 +119,10 @@ export const STAGE_KEYS = [
 
 /** Which actions a role may even attempt, so the interface offers only those. */
 export const ROLE_ACTIONS = {
-  farmer: ["transfer", "route", "accept", "cancel", "telemetry", "split", "recall", "destroy"],
-  processor: ["transfer", "route", "accept", "cancel", "stage", "telemetry", "split", "recall", "destroy"],
-  distributor: ["transfer", "route", "accept", "cancel", "stage", "telemetry", "destroy"],
-  retailer: ["transfer", "route", "accept", "cancel", "stage", "telemetry", "sell", "destroy"],
+  farmer: ["transfer", "route", "accept", "counter", "cancel", "telemetry", "split", "recall", "destroy"],
+  processor: ["transfer", "route", "accept", "counter", "cancel", "stage", "telemetry", "split", "recall", "destroy"],
+  distributor: ["transfer", "route", "accept", "counter", "cancel", "stage", "telemetry", "destroy"],
+  retailer: ["transfer", "route", "accept", "counter", "cancel", "stage", "telemetry", "sell", "destroy"],
   certifier: ["certify"],
   inspector: ["inspect", "recall", "destroy"],
   oracle: ["telemetry"],

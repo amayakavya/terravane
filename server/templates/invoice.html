@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoice {{INVOICE_NUMBER}} · Terravane</title>
+<style>
+  /* Self-contained on purpose. This file gets emailed, filed and printed on
+     machines that have never heard of this server, so it carries no stylesheet,
+     no font and no script it cannot supply itself. */
+  :root {
+    --ink: #1c2420;
+    --muted: #5b6058;
+    --rule: #dcd5bf;
+    --deep: #04241a;
+    --gold: #b6863b;
+    --paper: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 20px 64px;
+    background: #f1ede0;
+    color: var(--ink);
+    font: 15px/1.55 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .sheet {
+    max-width: 190mm;
+    margin: 0 auto;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 0 0 28px;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 28px;
+    padding: 28px 34px 22px;
+    background: var(--deep);
+    color: #e7d3a8;
+  }
+  .brand { font-size: 11px; letter-spacing: .28em; text-transform: uppercase; opacity: .7; }
+  h1 { margin: 6px 0 2px; font-size: 30px; font-weight: 500; color: #fff; letter-spacing: -.01em; }
+  .docref { font-size: 13px; opacity: .8; font-variant-numeric: tabular-nums; }
+  .stamp {
+    text-align: right;
+    font-size: 12px;
+    line-height: 1.7;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    opacity: .85;
+  }
+  section { padding: 0 34px; }
+  .parties {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    padding-top: 26px;
+    padding-bottom: 22px;
+  }
+  .label {
+    font-size: 10px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    margin-bottom: 6px;
+  }
+  .party-name { font-size: 18px; margin: 0 0 2px; }
+  .party-line { font-size: 13px; color: var(--muted); margin: 0; }
+  .addr {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    word-break: break-all;
+    margin-top: 4px;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 4px 0 0; }
+  th {
+    text-align: left;
+    font-size: 10px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-weight: 400;
+    padding: 10px 0;
+    border-top: 1.5px solid var(--ink);
+    border-bottom: 1px solid var(--rule);
+  }
+  td { padding: 14px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .total-row td { border-bottom: 0; padding-top: 16px; font-size: 19px; }
+  .total-row .label-cell { color: var(--muted); font-size: 13px; }
+  dl { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px 20px; margin: 0; }
+  dt { font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; padding-top: 3px; }
+  dd { margin: 0; font-size: 14px; }
+  .panel { border: 1px solid var(--rule); background: #faf8f0; padding: 18px 20px; margin-top: 24px; }
+  .attest { display: flex; gap: 22px; align-items: flex-start; margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--rule); }
+  .attest-body { flex: 1; min-width: 0; }
+  .hash { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; word-break: break-all; color: var(--muted); }
+  .qr { width: 104px; flex-shrink: 0; text-align: center; }
+  .qr svg { width: 104px; height: 104px; display: block; }
+  .qr p { margin: 6px 0 0; font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 26px; }
+  .sign div { border-top: 1px solid var(--ink); padding-top: 8px; }
+  .sign .who { font-size: 14px; }
+  .sign .when { font-size: 11px; color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  footer { margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 11px; color: var(--muted); }
+  .note { font-style: italic; color: var(--muted); }
+  @media print {
+    body { background: #fff; padding: 0; }
+    .sheet { border: 0; max-width: none; }
+  }
+  @media (max-width: 620px) {
+    .parties, .sign { grid-template-columns: 1fr; }
+    header { flex-direction: column; }
+    .stamp { text-align: left; }
+  }
+</style>
+</head>
+<body>
+<article class="sheet">
+
+  <header>
+    <div>
+      <p class="brand">Terravane</p>
+      <h1>Invoice</h1>
+      <p class="docref">{{INVOICE_NUMBER}}</p>
+    </div>
+    <div class="stamp">
+      <div>issued {{ISSUED_ON}}</div>
+      <div>lot #{{LOT_ID}}</div>
+      <div>settled block {{SETTLED_BLOCK}}</div>
+    </div>
+  </header>
+
+  <section class="parties">
+    <div>
+      <p class="label">Seller</p>
+      <p class="party-name">{{SELLER_NAME}}</p>
+      <p class="party-line">{{SELLER_LOCATION}}</p>
+      <p class="addr">{{SELLER_ADDRESS}}</p>
+    </div>
+    <div>
+      <p class="label">Buyer</p>
+      <p class="party-name">{{BUYER_NAME}}</p>
+      <p class="party-line">{{BUYER_LOCATION}}</p>
+      <p class="addr">{{BUYER_ADDRESS}}</p>
+    </div>
+  </section>
+
+  <section>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:52%">Description</th>
+          <th class="num">Quantity</th>
+          <th class="num">Unit price</th>
+          <th class="num">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <strong>{{PRODUCE}}</strong><br>
+            <span class="party-line">Lot #{{LOT_ID}} · grown by {{ORIGIN_FARM}} · harvested {{HARVESTED_ON}}</span>
+          </td>
+          <td class="num">{{QUANTITY}} {{UNIT}}</td>
+          <td class="num">{{PRICE_PER_UNIT}}</td>
+          <td class="num">{{LINE_TOTAL}}</td>
+        </tr>
+        <tr class="total-row">
+          <td colspan="2"></td>
+          <td class="num label-cell">Total {{CURRENCY}}</td>
+          <td class="num"><strong>{{TOTAL}}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="panel">
+      <dl>
+        <dt>Payment terms</dt><dd>{{PAYMENT_TERMS}}</dd>
+        <dt>Delivery by</dt><dd>{{DELIVER_BY}}</dd>
+        <dt>Handover note</dt><dd class="note">{{NOTE}}</dd>
+        <dt>Negotiation</dt><dd>{{ROUNDS}}</dd>
+      </dl>
+    </div>
+
+    <div class="attest">
+      <div class="attest-body">
+        <p class="label">Attestation</p>
+        <p style="margin:0 0 10px">
+          These terms were signed by both parties on the Terravane ledger. The digest below is the
+          one committed on chain; any document whose contents differ will not hash to it.
+        </p>
+        <p class="hash">terms {{TERMS_HASH}}</p>
+        <p class="hash">verify {{VERIFY_URL}}</p>
+      </div>
+      <div class="qr">
+        {{{QR_SVG}}}
+        <p>Verify lot</p>
+      </div>
+    </div>
+
+    <div class="sign">
+      <div>
+        <p class="who">{{SELLER_NAME}}</p>
+        <p class="when">offered {{OFFERED_ON}}</p>
+      </div>
+      <div>
+        <p class="who">{{BUYER_NAME}}</p>
+        <p class="when">countersigned {{AGREED_ON}}</p>
+      </div>
+    </div>
+
+    <footer>
+      Terravane provenance ledger · this invoice is generated from the ledger record for lot
+      #{{LOT_ID}} and carries no authority beyond it.
+    </footer>
+  </section>
+
+</article>
+</body>
+</html>

@@ -96,6 +96,25 @@ function render() {
   ({ overview, route, timeline, lineage, cold, actions })[tab](body);
 }
 
+/**
+ * A printed document, offered twice: opened in a tab to be read, and downloaded
+ * to be kept. The server decides which by the `inline` flag, so the same
+ * template serves both and there is only ever one version of the document.
+ */
+function documentLinks(label, href) {
+  const style = "font-body-sm text-[12px] text-primary hover:underline inline-flex items-center gap-1";
+  return el("p", { class: "mt-2 flex items-center gap-3 flex-wrap" }, [
+    el("a", { class: style, href: `${href}?inline`, target: "_blank", rel: "noopener" }, [
+      el("span", { html: icon("visibility", { size: 14 }) }),
+      label
+    ]),
+    el("a", { class: style, href, download: "" }, [
+      el("span", { html: icon("download", { size: 14 }) }),
+      t("doc.download")
+    ])
+  ]);
+}
+
 function linkButton(label, href, iconName) {
   return el("a", {
     href,
@@ -166,13 +185,22 @@ function routeStatusCard(route, b) {
 async function overview(body) {
   const b = dossier.batch;
   const attrs = dossier.attributes;
-  const certs = [...dossier.certifications, ...dossier.farmCertifications];
+  // Batch certifications carry their own printable certificate; farm-wide ones
+  // are held against the grower, not this lot, so they are listed but not
+  // issued from here.
+  const certs = [
+    ...dossier.certifications.map((c, index) => ({ ...c, index })),
+    ...dossier.farmCertifications.map((c) => ({ ...c, index: null }))
+  ];
   // Whoever planned this route — usually the farmer who will never hold the
   // lot again after the first hop — otherwise has no way to see it move
   // without opening every intermediate holder's Actions tab themselves.
   const route = await api.getRoute(b.id).catch(() => null);
 
+  const openDeal = dossier.handovers.find((h) => h.open) ?? null;
+
   add(body,
+    openDeal ? dealSlab(b, openDeal) : null,
     route ? routeStatusCard(route, b) : null,
     el("div", { class: "grid gap-6 xl:grid-cols-[1.3fr_1fr] items-start" }, [
       el("div", { class: "grid gap-6" }, [
@@ -206,7 +234,8 @@ async function overview(body) {
                     el("p", { class: "font-body-md text-body-sm font-medium text-on-surface", text: c.scheme }),
                     c.active ? null : badge(c.revoked ? t("act.cancel") : t("common.none"), "bad")
                   ]),
-                  el("p", { class: "font-body-sm text-[12px] text-on-surface-variant", text: `${c.certifier?.name ?? "-"} · ${c.expiresAt ? onDay(c.expiresAt) : t("common.none")}` })
+                  el("p", { class: "font-body-sm text-[12px] text-on-surface-variant", text: `${c.certifier?.name ?? "-"} · ${c.expiresAt ? onDay(c.expiresAt) : t("common.none")}` }),
+                  c.index === null ? null : documentLinks(t("doc.certificate"), api.certificateUrl(b.id, c.index))
                 ])
               ))
             : emptyState(t("common.none"), "verified")
@@ -316,7 +345,10 @@ function timeline(body) {
       at: h.settledAt || h.proposedAt,
       tone: h.accepted ? "good" : "warn",
       what: h.accepted ? t("event.sale") : h.cancelled ? t("act.cancel") : t("dist.pendingTransfers"),
-      who: `${h.from?.name ?? "?"} to ${h.to?.name ?? "?"}${h.note ? ` · ${h.note}` : ""}`
+      who: `${h.from?.name ?? "?"} to ${h.to?.name ?? "?"}${h.note ? ` · ${h.note}` : ""}`,
+      // Only a countersigned deal has an invoice. An offer nobody accepted is
+      // not a sale, and the server refuses to render one either way.
+      extra: h.accepted ? documentLinks(t("doc.invoice"), api.invoiceUrl(b.id, h.index)) : null
     });
   }
   for (const c of dossier.certifications) {
@@ -350,7 +382,8 @@ function timeline(body) {
           i < items.length - 1 ? el("span", { class: "absolute left-[4.5px] top-4 bottom-0 w-px bg-outline-variant" }) : null,
           el("p", { class: "font-label-sm text-[11px] tracking-wide text-on-surface-variant/70", text: `${when(item.at)} · ${ago(item.at)} ago` }),
           el("p", { class: "font-body-md text-body-sm text-on-surface mt-0.5", text: item.what }),
-          item.who ? el("p", { class: "font-body-sm text-[12px] text-on-surface-variant", text: item.who }) : null
+          item.who ? el("p", { class: "font-body-sm text-[12px] text-on-surface-variant", text: item.who }) : null,
+          item.extra ?? null
         ])
       ))
     ])
@@ -431,9 +464,17 @@ function cold(body) {
 // --------------------------------------------------------------------------
 
 const ACTIONS = {
+  // An offer is a deal, so the form that makes one asks for the deal. The
+  // recipient sees exactly these numbers before they sign anything.
   transfer: {
     label: "act.transfer",
-    fields: [["to", "act.recipient", "participant"], ["note", "act.note", "text"]],
+    fields: [
+      ["to", "act.recipient", "participant"],
+      ["pricePerUnit", "deal.price", "number"],
+      ["paymentTerms", "deal.payment", "text"],
+      ["deliverBy", "deal.deliverBy", "isodate"],
+      ["note", "act.note", "text"]
+    ],
     run: (id, body) => api.transfer(id, body)
   },
   route: {
@@ -441,8 +482,6 @@ const ACTIONS = {
     fields: [["steps", "act.routeSteps", "route"]],
     run: (id, body) => api.route(id, body)
   },
-  accept: { label: "act.accept", fields: [], run: (id, body) => api.accept(id, body) },
-  cancel: { label: "act.cancel", fields: [], run: (id, body) => api.cancelTransfer(id, body) },
   stage: { label: "act.stage", fields: [["stage", "act.stage", "stage"]], run: (id, body) => api.advance(id, body) },
   telemetry: {
     label: "act.telemetry",
@@ -469,6 +508,117 @@ const ACTIONS = {
   },
   destroy: { label: "act.destroy", danger: true, fields: [["reason", "act.reason", "text"]], run: (id, body) => api.destroy(id, body) }
 };
+
+/** The money on a deal, formatted the way the invoice will format it. */
+const money = (value, currency) =>
+  `${Number(value).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency ?? ""}`.trim();
+
+/**
+ * The open deal, shown to both sides of it.
+ *
+ * Custody does not move on one party's say-so: an offer sits here until the
+ * other side signs the same terms digest, counters it, or walks away. Whoever
+ * is being asked gets the buttons; whoever is waiting gets told who they are
+ * waiting on. The terms are always shown in full, because signing a hash you
+ * were never shown the contents of is not agreement, it is a formality.
+ */
+function dealSlab(b, deal) {
+  const mine = String(me.address).toLowerCase();
+  const yours = deal.awaiting?.address?.toLowerCase() === mine;
+  const involved = yours || deal.from?.address?.toLowerCase() === mine || deal.to?.address?.toLowerCase() === mine;
+  const terms = deal.terms ?? {};
+
+  const result = el("div", { class: "mt-4" });
+  const rows = [
+    [t("deal.moving"), `${qty(terms.quantity ?? b.quantity, terms.unit ?? b.unit)} · ${b.produceType}`],
+    [t("deal.parties"), `${deal.from?.name ?? "?"} → ${deal.to?.name ?? "?"}`],
+    Number(terms.pricePerUnit) ? [t("deal.price"), money(terms.pricePerUnit, terms.currency)] : null,
+    Number(terms.total) ? [t("deal.total"), money(terms.total, terms.currency)] : [t("deal.total"), t("deal.noPrice")],
+    terms.paymentTerms ? [t("deal.payment"), terms.paymentTerms] : null,
+    terms.deliverBy ? [t("deal.deliverBy"), terms.deliverBy] : null,
+    deal.note ? [t("act.note"), deal.note] : null,
+    [t("deal.offered"), `${when(deal.proposedAt)} · ${t("deal.round", { n: deal.round })}`]
+  ];
+
+  const run = async (label, work) => {
+    clear(result);
+    try {
+      const receipt = await work();
+      toast(`${label} — ${t("act.done")}`, "good");
+      add(result, notice(`${label}\n${t("act.committed", { block: receipt.block, gas: Number(receipt.gasUsed).toLocaleString() })}`, "good"));
+      await reload();
+      tab = "actions";
+    } catch (err) {
+      add(result, notice(err.message, "bad"));
+    }
+  };
+
+  // Countering is a form, not a button: it is a fresh set of numbers, and the
+  // side answering has to be able to see what it is changing from.
+  const counterForm = el("div", { class: "hidden mt-5 rounded-lg border border-outline-variant bg-surface-container-lowest p-5" });
+  const price = input({ type: "number", step: "any", min: "0", value: terms.pricePerUnit ?? 0 });
+  const payment = input({ type: "text", value: terms.paymentTerms ?? "", placeholder: t("deal.paymentPlaceholder") });
+  const deliverBy = input({ type: "date", value: terms.deliverBy ?? "" });
+  const counterNote = input({ type: "text", placeholder: t("deal.counterNotePlaceholder") });
+  const sendCounter = button(t("deal.sendCounter"), { tone: "primary" });
+
+  sendCounter.addEventListener("click", () =>
+    run(t("deal.countered"), () =>
+      api.counter(b.id, {
+        as: me.address,
+        pricePerUnit: Number(price.value) || 0,
+        currency: terms.currency ?? "INR",
+        paymentTerms: payment.value,
+        deliverBy: deliverBy.value,
+        note: counterNote.value
+      })
+    )
+  );
+
+  add(counterForm,
+    el("p", { class: "font-body-sm text-body-sm text-on-surface-variant mb-4", text: t("deal.counterHint") }),
+    el("div", { class: "grid gap-4 sm:grid-cols-2" }, [
+      field(t("deal.price"), price),
+      field(t("deal.payment"), payment),
+      field(t("deal.deliverBy"), deliverBy),
+      field(t("act.note"), counterNote)
+    ]),
+    el("div", { class: "mt-5" }, sendCounter)
+  );
+
+  const controls = [];
+  if (yours) {
+    const accept = button(t("deal.signAccept"), { tone: "primary" });
+    // The digest signed is the one that was on screen. If the other side
+    // countered in the meantime, the chain refuses it rather than binding
+    // this desk to terms it never read.
+    accept.addEventListener("click", () =>
+      run(t("deal.accepted"), () => api.accept(b.id, { as: me.address, termsHash: deal.termsHash }))
+    );
+    const counter = button(t("deal.counter"), { tone: "quiet" });
+    counter.addEventListener("click", () => counterForm.classList.toggle("hidden"));
+    controls.push(accept, counter);
+  }
+  if (involved) {
+    const walk = button(t("deal.walkAway"), { tone: "danger" });
+    walk.addEventListener("click", () => run(t("deal.cancelled"), () => api.cancelTransfer(b.id, { as: me.address })));
+    controls.push(walk);
+  }
+
+  return card([
+    cardHeader(
+      t("deal.title"),
+      badge(yours ? t("deal.awaitingYou") : t("deal.awaitingThem", { name: deal.awaiting?.name ?? "?" }), yours ? "warn" : "neutral")
+    ),
+    definition(rows),
+    el("div", { class: "px-6 pb-5" }, [
+      el("p", { class: "font-label-sm text-[10px] tracking-widest uppercase text-on-surface-variant/60 break-all", text: `${t("deal.digest")} ${deal.termsHash}` }),
+      controls.length ? el("div", { class: "flex flex-wrap gap-3 mt-4" }, controls) : notice(t("deal.notYours")),
+      counterForm,
+      result
+    ])
+  ], `rise-in mb-6 ${yours ? "border-gold/60" : ""}`);
+}
 
 // A dedicated sale slab, separate from the generic action chooser below — this
 // is the one action a retailer does over and over on the same lot as stock
@@ -569,8 +719,12 @@ function routeSlab(b, route, mine) {
 async function actions(body) {
   const b = dossier.batch;
   const mine = b.custodian?.address?.toLowerCase() === me.address.toLowerCase();
-  const offered = b.pendingCustodian?.address?.toLowerCase() === me.address.toLowerCase();
   const roles = me.roles ?? [];
+
+  // A lot with a deal open cannot be offered anywhere else until that one is
+  // closed, so the deal comes first and the rest of the actions stand down.
+  const openDeal = dossier.handovers.find((h) => h.open) ?? null;
+  if (openDeal) add(body, dealSlab(b, openDeal));
 
   const remaining = Number(b.quantity) - Number(b.soldQuantity);
   if (roles.includes("retailer") && mine && !b.recalled && b.stage < 5 && remaining > 0) {
@@ -583,9 +737,11 @@ async function actions(body) {
   // Only offer what this participant could actually do with this lot. The chain
   // refuses the rest anyway; presenting them would just be a menu of failures.
   const available = allowedActions(roles).filter((key) => {
-    if (["transfer", "route", "stage", "split", "sell"].includes(key)) return mine && !b.recalled && b.stage < 5;
-    if (key === "accept") return offered;
-    if (key === "cancel") return Boolean(b.pendingCustodian) && (mine || offered);
+    // Accepting, countering and walking away all belong to the deal slab above,
+    // where the terms being signed are actually on screen. Offering them again
+    // here as a bare dropdown entry would be asking someone to sign blind.
+    if (["accept", "counter", "cancel"].includes(key)) return false;
+    if (["transfer", "route", "stage", "split", "sell"].includes(key)) return mine && !b.recalled && b.stage < 5 && !openDeal;
     if (key === "telemetry") return mine || roles.includes("oracle");
     if (key === "recall") return !b.recalled;
     if (key === "destroy") return b.stage !== 6 && (mine || roles.includes("inspector") || roles.includes("admin"));
@@ -643,6 +799,7 @@ async function actions(body) {
         if (kind === "bool") value = value === "true";
         else if (kind === "list") value = value.split(",").map((s) => s.trim()).filter(Boolean);
         else if (kind === "number" && value !== "") value = Number(value);
+        else if (kind === "isodate") value = value || "";
         else if (kind === "date") {
           const target = new Date(`${value}T00:00:00`);
           const today = new Date();
@@ -745,6 +902,11 @@ function control(name, kind, participants, batch) {
       custom.style.display = choice.value === "custom" ? "" : "none";
     });
     return el("div", { class: "grid gap-2" }, [choice, custom]);
+  }
+  if (kind === "isodate") {
+    // A delivery date is a date, not a countdown — unlike a certificate's
+    // validity below, which the contract wants in days from now.
+    return input({ name, type: "date", min: new Date().toISOString().slice(0, 10) });
   }
   if (kind === "date") {
     const today = new Date();

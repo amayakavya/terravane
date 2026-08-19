@@ -220,18 +220,22 @@ export class Indexer {
       .prepare(`
         INSERT INTO batches(
           id, produce_type, variety, quantity, sold_quantity, unit, origin_farm, custodian, pending_custodian,
+          pending_awaiting, pending_terms, pending_round,
           stage, recalled, cold_chain_required, cold_chain_breached, min_temp, max_temp, harvested_at, created_at,
           origin_geohash, origin_location, lat, lon, metadata_uri, metadata_hash, handover_count, telemetry_count,
           cert_count, inspection_count, active_certs, failed_inspections, custody_intact, parents, children, updated_block
         ) VALUES(
           @id, @produce_type, @variety, @quantity, @sold_quantity, @unit, @origin_farm, @custodian, @pending_custodian,
+          @pending_awaiting, @pending_terms, @pending_round,
           @stage, @recalled, @cold_chain_required, @cold_chain_breached, @min_temp, @max_temp, @harvested_at, @created_at,
           @origin_geohash, @origin_location, @lat, @lon, @metadata_uri, @metadata_hash, @handover_count, @telemetry_count,
           @cert_count, @inspection_count, @active_certs, @failed_inspections, @custody_intact, @parents, @children, @updated_block
         )
         ON CONFLICT(id) DO UPDATE SET
           quantity = excluded.quantity, sold_quantity = excluded.sold_quantity, custodian = excluded.custodian,
-          pending_custodian = excluded.pending_custodian, stage = excluded.stage, recalled = excluded.recalled,
+          pending_custodian = excluded.pending_custodian, pending_awaiting = excluded.pending_awaiting,
+          pending_terms = excluded.pending_terms, pending_round = excluded.pending_round,
+          stage = excluded.stage, recalled = excluded.recalled,
           cold_chain_breached = excluded.cold_chain_breached, handover_count = excluded.handover_count,
           telemetry_count = excluded.telemetry_count, cert_count = excluded.cert_count,
           inspection_count = excluded.inspection_count, active_certs = excluded.active_certs,
@@ -249,6 +253,9 @@ export class Indexer {
         origin_farm: b.originFarm,
         custodian: b.custodian,
         pending_custodian: pending[0] ? pending[1] : null,
+        pending_awaiting: pending[0] ? pending[2] : null,
+        pending_terms: pending[0] ? pending[3] : null,
+        pending_round: pending[0] ? Number(pending[4]) : null,
         stage: Number(b.stage),
         recalled: b.recalled ? 1 : 0,
         cold_chain_required: b.coldChainRequired ? 1 : 0,

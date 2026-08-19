@@ -7,8 +7,11 @@ import {IAccessRegistry} from "./interfaces/IAccessRegistry.sol";
 /// @notice The provenance ledger for agricultural produce: origination, custody,
 ///         transformation, cold-chain telemetry, certification, inspection and recall.
 /// @dev Design notes that matter if any of this is ever refactored:
-///      - Custody moves in two steps (propose then accept). A single-step push would
-///        let a distributor dump a spoiled lot on a retailer who never consented.
+///      - Custody moves on a bilateral handshake, never a push. One side offers a
+///        deal, the other countersigns the identical terms digest, and either may
+///        counter instead — which flips whose signature is outstanding. A lot
+///        cannot arrive anywhere its receiver did not agree to take it on, on
+///        terms both sides put their key to.
 ///      - Lineage is stored both ways (parents and children) because a recall walks
 ///        downward and an audit walks upward; neither direction is affordable to derive.
 ///      - Recall propagation is caller-supplied and contract-verified. An on-chain
@@ -78,7 +81,12 @@ contract ProduceRegistry {
         uint64 settledAt;
         string geohash;
         string note;
-        bytes32 documentHash; // digest of the bill of lading / e-way bill
+        // Digest of the off-chain deal: quantity, price, payment and delivery
+        // terms. Both sides sign this exact value or the handover does not
+        // settle, so neither can restate the bargain afterwards.
+        bytes32 termsHash;
+        address awaiting; // whose countersignature the deal is outstanding on
+        uint8 round; // 1 on the opening offer, one higher per counter-offer
         bool accepted;
         bool cancelled;
     }
@@ -193,8 +201,11 @@ contract ProduceRegistry {
         uint64 harvestedAt,
         string originGeohash
     );
-    event TransferProposed(uint256 indexed batchId, address indexed from, address indexed to, uint256 handoverIndex);
-    event TransferAccepted(uint256 indexed batchId, address indexed from, address indexed to, string geohash);
+    event TransferProposed(
+        uint256 indexed batchId, address indexed from, address indexed to, uint256 handoverIndex, bytes32 termsHash
+    );
+    event TransferCountered(uint256 indexed batchId, address indexed by, address indexed awaiting, bytes32 termsHash, uint8 round);
+    event TransferAccepted(uint256 indexed batchId, address indexed from, address indexed to, string geohash, bytes32 termsHash);
     event TransferCancelled(uint256 indexed batchId, address indexed by, uint256 handoverIndex);
     event StageAdvanced(uint256 indexed batchId, Stage indexed from, Stage indexed to, address by);
     event TelemetryRecorded(
@@ -227,6 +238,9 @@ contract ProduceRegistry {
     error RecipientUnfit();
     error TransferPending();
     error NoPendingTransfer();
+    error TermsRequired();
+    error TermsMismatch();
+    error NotAwaiting();
     error StageNotMonotonic();
     error BatchTerminal();
     error BatchRecalled();
@@ -245,21 +259,38 @@ contract ProduceRegistry {
         _;
     }
 
+    // Each of these delegates to a private function rather than inlining its
+    // checks. A modifier's body is copied into every function that wears it, and
+    // this contract wears them a couple of dozen times over; against a 24,576
+    // byte deployment ceiling that duplication is the difference between
+    // deployable and not.
     modifier onlyRole(uint8 role) {
-        if (!access.hasRole(msg.sender, role)) revert NotAuthorised();
-        if (!access.isActive(msg.sender)) revert InactiveParticipant();
+        _mustHaveRole(role);
         _;
     }
 
     modifier exists(uint256 batchId) {
-        if (batchId == 0 || batchId > batchCount) revert NoBatch();
+        _mustExist(batchId);
         _;
     }
 
     modifier onlyCustodian(uint256 batchId) {
+        _mustHoldCustody(batchId);
+        _;
+    }
+
+    function _mustHaveRole(uint8 role) private view {
+        if (!access.hasRole(msg.sender, role)) revert NotAuthorised();
+        if (!access.isActive(msg.sender)) revert InactiveParticipant();
+    }
+
+    function _mustExist(uint256 batchId) private view {
+        if (batchId == 0 || batchId > batchCount) revert NoBatch();
+    }
+
+    function _mustHoldCustody(uint256 batchId) private view {
         if (_batches[batchId].custodian != msg.sender) revert NotCustodian();
         if (!access.isActive(msg.sender)) revert InactiveParticipant();
-        _;
     }
 
     constructor(address accessRegistry) {
@@ -315,7 +346,13 @@ contract ProduceRegistry {
     // Custody
     // ---------------------------------------------------------------------
 
-    function proposeTransfer(uint256 batchId, address to, string calldata geohash, string calldata note, bytes32 documentHash)
+    /// @notice Open a deal on a lot: an offer to hand it to `to` on the terms
+    ///         `termsHash` digests. This binds nobody yet — it is one half of a
+    ///         handshake, and the lot does not move until the other half lands.
+    /// @param termsHash Digest of the off-chain deal document. Required: a
+    ///        handover with no stated bargain is exactly the unilateral push
+    ///        this contract exists to prevent.
+    function proposeTransfer(uint256 batchId, address to, string calldata geohash, string calldata note, bytes32 termsHash)
         external
         whenLive
         exists(batchId)
@@ -326,6 +363,7 @@ contract ProduceRegistry {
         if (b.stage == Stage.Sold || b.stage == Stage.Destroyed) revert BatchTerminal();
         if (_pendingHandover[batchId] != 0) revert TransferPending();
         if (to == address(0) || to == msg.sender) revert BadInput();
+        if (termsHash == bytes32(0)) revert TermsRequired();
         // The receiving node must be a live participant able to hold custody.
         if (!access.isRegistered(to) || !access.isActive(to)) revert RecipientUnfit();
         if (!_canHoldCustody(to)) revert RecipientUnfit();
@@ -338,7 +376,9 @@ contract ProduceRegistry {
                 settledAt: 0,
                 geohash: geohash,
                 note: note,
-                documentHash: documentHash,
+                termsHash: termsHash,
+                awaiting: to,
+                round: 1,
                 accepted: false,
                 cancelled: false
             })
@@ -347,46 +387,80 @@ contract ProduceRegistry {
         _pendingHandover[batchId] = idx + 1;
         b.pendingCustodian = to;
 
-        emit TransferProposed(batchId, msg.sender, to, idx);
+        emit TransferProposed(batchId, msg.sender, to, idx, termsHash);
     }
 
-    /// @notice Recipient countersigns. Custody, and with it liability, moves here.
-    function acceptTransfer(uint256 batchId, string calldata geohash) external whenLive exists(batchId) {
-        uint256 slot = _pendingHandover[batchId];
-        if (slot == 0) revert NoPendingTransfer();
-        Handover storage h = _handovers[batchId][slot - 1];
-        if (h.to != msg.sender) revert NotAuthorised();
+    /// @notice Answer an open offer with different terms. The side that was being
+    ///         asked to sign becomes the side doing the asking; the lot still goes
+    ///         the same way if it goes at all, but on whose numbers is now back
+    ///         with the other party. This is what makes the handshake a
+    ///         negotiation rather than a take-it-or-leave-it.
+    function counterTransfer(uint256 batchId, bytes32 termsHash, string calldata note)
+        external
+        whenLive
+        exists(batchId)
+    {
+        Handover storage h = _pendingDeal(batchId);
+        if (termsHash == bytes32(0)) revert TermsRequired();
+        // Countering is the outstanding signature's alternative to giving it, so
+        // only the party being asked may do it. Re-pricing your own open offer is
+        // a cancel and a fresh proposal, in public, not a quiet edit.
+        if (h.awaiting != msg.sender) revert NotAwaiting();
+        if (!access.isActive(msg.sender)) revert InactiveParticipant();
+        if (termsHash == h.termsHash) revert BadInput();
+
+        h.termsHash = termsHash;
+        h.awaiting = msg.sender == h.to ? h.from : h.to;
+        h.round += 1;
+        if (bytes(note).length != 0) h.note = note;
+
+        emit TransferCountered(batchId, msg.sender, h.awaiting, termsHash, h.round);
+    }
+
+    /// @notice Close the handshake by countersigning the terms on the table.
+    ///         Custody, and with it liability, moves to the receiving side.
+    /// @param termsHash Must equal the terms currently open. Passing a stale
+    ///        digest means the caller is agreeing to a deal that has since been
+    ///        countered, and is refused rather than silently upgraded.
+    function acceptTransfer(uint256 batchId, string calldata geohash, bytes32 termsHash)
+        external
+        whenLive
+        exists(batchId)
+    {
+        Handover storage h = _pendingDeal(batchId);
+        if (h.awaiting != msg.sender) revert NotAwaiting();
+        if (h.termsHash != termsHash) revert TermsMismatch();
         if (!access.isActive(msg.sender)) revert InactiveParticipant();
 
         Batch storage b = _batches[batchId];
         address from = b.custodian;
 
         h.accepted = true;
+        h.awaiting = address(0);
         h.settledAt = uint64(block.timestamp);
         if (bytes(geohash).length != 0) h.geohash = geohash;
 
-        b.custodian = msg.sender;
+        b.custodian = h.to;
         b.pendingCustodian = address(0);
         b.handoverCount += 1;
         _pendingHandover[batchId] = 0;
-        _batchesByCustodian[msg.sender].push(batchId);
+        _batchesByCustodian[h.to].push(batchId);
 
-        emit TransferAccepted(batchId, from, msg.sender, h.geohash);
+        emit TransferAccepted(batchId, from, h.to, h.geohash, termsHash);
     }
 
-    /// @notice Either side may walk away from an unaccepted handover.
+    /// @notice Either side may walk away from a deal that has not been closed.
     function cancelTransfer(uint256 batchId) external whenLive exists(batchId) {
-        uint256 slot = _pendingHandover[batchId];
-        if (slot == 0) revert NoPendingTransfer();
-        Handover storage h = _handovers[batchId][slot - 1];
+        Handover storage h = _pendingDeal(batchId);
         if (msg.sender != h.from && msg.sender != h.to) revert NotAuthorised();
 
         h.cancelled = true;
+        h.awaiting = address(0);
         h.settledAt = uint64(block.timestamp);
         _pendingHandover[batchId] = 0;
         _batches[batchId].pendingCustodian = address(0);
 
-        emit TransferCancelled(batchId, msg.sender, slot - 1);
+        emit TransferCancelled(batchId, msg.sender, _handovers[batchId].length - 1);
     }
 
     // ---------------------------------------------------------------------
@@ -572,20 +646,7 @@ contract ProduceRegistry {
         bytes32 evidenceHash
     ) external whenLive exists(batchId) onlyRole(ROLE_CERTIFIER) {
         if (bytes(scheme).length == 0) revert BadInput();
-        bytes32 schemeId = keccak256(bytes(scheme));
-        _batchCerts[batchId].push(
-            Certification({
-                certifier: msg.sender,
-                schemeId: schemeId,
-                scheme: scheme,
-                issuedAt: uint64(block.timestamp),
-                expiresAt: expiresAt,
-                evidenceURI: evidenceURI,
-                evidenceHash: evidenceHash,
-                revoked: false,
-                revocationReason: ""
-            })
-        );
+        bytes32 schemeId = _record(_batchCerts[batchId], scheme, expiresAt, evidenceURI, evidenceHash);
         _batches[batchId].certCount += 1;
         emit BatchCertified(batchId, msg.sender, schemeId, scheme, expiresAt);
     }
@@ -598,8 +659,21 @@ contract ProduceRegistry {
         bytes32 evidenceHash
     ) external whenLive onlyRole(ROLE_CERTIFIER) {
         if (!access.isRegistered(farm)) revert BadInput();
-        bytes32 schemeId = keccak256(bytes(scheme));
-        _farmCerts[farm].push(
+        bytes32 schemeId = _record(_farmCerts[farm], scheme, expiresAt, evidenceURI, evidenceHash);
+        emit FarmCertified(farm, msg.sender, schemeId, expiresAt);
+    }
+
+    /// A certification of a lot and one of a farm differ only in which list they
+    /// land in; the record itself is written once, here.
+    function _record(
+        Certification[] storage into,
+        string calldata scheme,
+        uint64 expiresAt,
+        string calldata evidenceURI,
+        bytes32 evidenceHash
+    ) private returns (bytes32 schemeId) {
+        schemeId = keccak256(bytes(scheme));
+        into.push(
             Certification({
                 certifier: msg.sender,
                 schemeId: schemeId,
@@ -612,7 +686,6 @@ contract ProduceRegistry {
                 revocationReason: ""
             })
         );
-        emit FarmCertified(farm, msg.sender, schemeId, expiresAt);
     }
 
     function revokeBatchCertification(uint256 batchId, uint256 index, string calldata reason)
@@ -777,10 +850,18 @@ contract ProduceRegistry {
         return _soldQuantity[batchId];
     }
 
-    function pendingTransfer(uint256 batchId) external view returns (bool pending, address to) {
+    /// @notice The deal currently on the table, if any: who it moves the lot to,
+    ///         whose signature it waits on, what terms are open, and how many
+    ///         rounds of counter-offer it has taken to get here.
+    function pendingTransfer(uint256 batchId)
+        external
+        view
+        returns (bool pending, address to, address awaiting, bytes32 termsHash, uint8 round)
+    {
         uint256 slot = _pendingHandover[batchId];
-        if (slot == 0) return (false, address(0));
-        return (true, _handovers[batchId][slot - 1].to);
+        if (slot == 0) return (false, address(0), address(0), bytes32(0), 0);
+        Handover storage h = _handovers[batchId][slot - 1];
+        return (true, h.to, h.awaiting, h.termsHash, h.round);
     }
 
     /// @notice One call answering everything a shopper scanning a QR code cares about.
@@ -796,18 +877,7 @@ contract ProduceRegistry {
         v.custodian = b.custodian;
         v.chainLength = _handovers[batchId].length;
 
-        Certification[] storage certs = _batchCerts[batchId];
-        for (uint256 i = 0; i < certs.length; i++) {
-            if (!certs[i].revoked && (certs[i].expiresAt == 0 || certs[i].expiresAt > block.timestamp)) {
-                v.activeCertifications++;
-            }
-        }
-        Certification[] storage farmCerts = _farmCerts[b.originFarm];
-        for (uint256 i = 0; i < farmCerts.length; i++) {
-            if (!farmCerts[i].revoked && (farmCerts[i].expiresAt == 0 || farmCerts[i].expiresAt > block.timestamp)) {
-                v.activeCertifications++;
-            }
-        }
+        v.activeCertifications = _liveCerts(_batchCerts[batchId]) + _liveCerts(_farmCerts[b.originFarm]);
 
         Inspection[] storage checks = _inspections[batchId];
         for (uint256 i = 0; i < checks.length; i++) {
@@ -815,19 +885,35 @@ contract ProduceRegistry {
         }
         if (checks.length > 0) v.lastInspectionGrade = checks[checks.length - 1].grade;
 
-        // Custody is intact when every recorded handover was accepted, and the
-        // current holder is still a participant in good standing.
+        // Custody is intact when no handover was left hanging — an open deal
+        // still waiting on a signature is precisely a gap in the record — and
+        // the current holder is still a participant in good standing.
         bool intact = access.isActive(b.custodian);
         Handover[] storage hs = _handovers[batchId];
         for (uint256 i = 0; i < hs.length; i++) {
-            if (!hs[i].accepted && !hs[i].cancelled) intact = false;
+            if (hs[i].awaiting != address(0)) intact = false;
         }
         v.custodyIntact = intact;
+    }
+
+    /// Certifications still standing: not revoked, and not past their expiry.
+    function _liveCerts(Certification[] storage list) private view returns (uint256 live) {
+        for (uint256 i = 0; i < list.length; i++) {
+            if (!list[i].revoked && (list[i].expiresAt == 0 || list[i].expiresAt > block.timestamp)) live++;
+        }
     }
 
     // ---------------------------------------------------------------------
     // Internals
     // ---------------------------------------------------------------------
+
+    /// The open handover for a lot, or a revert if there is none. Every side of
+    /// the handshake reaches for the same one.
+    function _pendingDeal(uint256 batchId) private view returns (Handover storage) {
+        uint256 slot = _pendingHandover[batchId];
+        if (slot == 0) revert NoPendingTransfer();
+        return _handovers[batchId][slot - 1];
+    }
 
     function _cloneInto(uint256 newId, Batch storage src, uint128 quantity) private {
         Batch storage c = _batches[newId];

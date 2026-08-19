@@ -26,6 +26,14 @@ const STAGE = {
 
 const ZERO_HASH = ethers.ZeroHash;
 
+// A handover carries the digest of the deal both sides are signing. The digests
+// themselves are opaque to the contract — what matters is that the two
+// signatures land on the same one, so the tests only need two distinguishable
+// values and a third nobody ever offered.
+const TERMS = ethers.id("terms:1200 INR/kg, net 30");
+const COUNTER_TERMS = ethers.id("terms:1100 INR/kg, net 15");
+const OTHER_TERMS = ethers.id("terms:never offered");
+
 function batchInput(overrides = {}) {
   return {
     produceType: "Rice",
@@ -247,17 +255,20 @@ describe("Custody", () => {
   });
 
   it("moves custody only after the recipient countersigns", async () => {
-    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "tuvz5x", "truck HR55", ZERO_HASH);
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "tuvz5x", "truck HR55", TERMS);
 
     let b = await ctx.registry.getBatch(id);
     assert.equal(b.custodian, ctx.farmer.address, "custody must not move on proposal alone");
     assert.equal(b.pendingCustodian, ctx.processor.address);
 
-    const [pending, to] = await ctx.registry.pendingTransfer(id);
+    const [pending, to, awaiting, terms, round] = await ctx.registry.pendingTransfer(id);
     assert.equal(pending, true);
     assert.equal(to, ctx.processor.address);
+    assert.equal(awaiting, ctx.processor.address);
+    assert.equal(terms, TERMS);
+    assert.equal(Number(round), 1);
 
-    await ctx.registry.connect(ctx.processor).acceptTransfer(id, "tuw12b");
+    await ctx.registry.connect(ctx.processor).acceptTransfer(id, "tuw12b", TERMS);
     b = await ctx.registry.getBatch(id);
     assert.equal(b.custodian, ctx.processor.address);
     assert.equal(b.pendingCustodian, ethers.ZeroAddress);
@@ -271,45 +282,119 @@ describe("Custody", () => {
 
   it("refuses a proposal from anyone but the custodian", async () => {
     await expectRevert(
-      ctx.registry.connect(ctx.distributor).proposeTransfer(id, ctx.retailer.address, "", "", ZERO_HASH),
+      ctx.registry.connect(ctx.distributor).proposeTransfer(id, ctx.retailer.address, "", "", TERMS),
       "NotCustodian"
     );
   });
 
   it("refuses a recipient who cannot legally hold custody", async () => {
     await expectRevert(
-      ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.certifier.address, "", "", ZERO_HASH),
+      ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.certifier.address, "", "", TERMS),
       "RecipientUnfit"
     );
     await expectRevert(
-      ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.outsider.address, "", "", ZERO_HASH),
+      ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.outsider.address, "", "", TERMS),
       "RecipientUnfit"
     );
   });
 
   it("allows only one open handover at a time", async () => {
-    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", ZERO_HASH);
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", TERMS);
     await expectRevert(
-      ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.distributor.address, "", "", ZERO_HASH),
+      ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.distributor.address, "", "", TERMS),
       "TransferPending"
     );
   });
 
   it("lets either party cancel, freeing the lot", async () => {
-    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", ZERO_HASH);
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", TERMS);
     await ctx.registry.connect(ctx.processor).cancelTransfer(id);
 
     const [pending] = await ctx.registry.pendingTransfer(id);
     assert.equal(pending, false);
 
-    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.distributor.address, "", "", ZERO_HASH);
-    await ctx.registry.connect(ctx.distributor).acceptTransfer(id, "");
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.distributor.address, "", "", TERMS);
+    await ctx.registry.connect(ctx.distributor).acceptTransfer(id, "", TERMS);
     assert.equal((await ctx.registry.getBatch(id)).custodian, ctx.distributor.address);
   });
 
   it("refuses acceptance by a party the lot was not offered to", async () => {
-    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", ZERO_HASH);
-    await expectRevert(ctx.registry.connect(ctx.distributor).acceptTransfer(id, ""), "NotAuthorised");
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", TERMS);
+    await expectRevert(ctx.registry.connect(ctx.distributor).acceptTransfer(id, "", TERMS), "NotAwaiting");
+  });
+
+  it("refuses a handover with no stated deal", async () => {
+    await expectRevert(
+      ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", ZERO_HASH),
+      "TermsRequired"
+    );
+  });
+
+  it("refuses acceptance of terms other than the ones on the table", async () => {
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", TERMS);
+    await expectRevert(ctx.registry.connect(ctx.processor).acceptTransfer(id, "", OTHER_TERMS), "TermsMismatch");
+    assert.equal((await ctx.registry.getBatch(id)).custodian, ctx.farmer.address);
+  });
+
+  it("hands the outstanding signature back when the recipient counters", async () => {
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", TERMS);
+    await ctx.registry.connect(ctx.processor).counterTransfer(id, COUNTER_TERMS, "1100 is what the mill pays");
+
+    const [pending, to, awaiting, terms, round] = await ctx.registry.pendingTransfer(id);
+    assert.equal(pending, true);
+    assert.equal(to, ctx.processor.address, "a counter re-prices the deal, it does not reverse it");
+    assert.equal(awaiting, ctx.farmer.address, "the offering side now owes the signature");
+    assert.equal(terms, COUNTER_TERMS);
+    assert.equal(Number(round), 2);
+
+    // The original terms are dead the moment they are countered.
+    await expectRevert(ctx.registry.connect(ctx.farmer).acceptTransfer(id, "", TERMS), "TermsMismatch");
+
+    await ctx.registry.connect(ctx.farmer).acceptTransfer(id, "", COUNTER_TERMS);
+    const b = await ctx.registry.getBatch(id);
+    assert.equal(b.custodian, ctx.processor.address, "custody still moves to the receiving side");
+
+    const [h] = await ctx.registry.getHandovers(id);
+    assert.equal(h.accepted, true);
+    assert.equal(h.termsHash, COUNTER_TERMS);
+    assert.equal(h.awaiting, ethers.ZeroAddress);
+    assert.equal(Number(h.round), 2);
+    assert.equal(h.note, "1100 is what the mill pays");
+  });
+
+  it("refuses a counter from the side that is already waiting on an answer", async () => {
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", TERMS);
+    await expectRevert(ctx.registry.connect(ctx.farmer).counterTransfer(id, COUNTER_TERMS, ""), "NotAwaiting");
+    await expectRevert(ctx.registry.connect(ctx.distributor).counterTransfer(id, COUNTER_TERMS, ""), "NotAwaiting");
+  });
+
+  it("refuses a counter that changes nothing", async () => {
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", TERMS);
+    await expectRevert(ctx.registry.connect(ctx.processor).counterTransfer(id, TERMS, ""), "BadInput");
+    await expectRevert(ctx.registry.connect(ctx.processor).counterTransfer(id, ZERO_HASH, ""), "TermsRequired");
+  });
+
+  it("counts an unsettled deal as a gap in the custody record", async () => {
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", TERMS);
+    assert.equal((await ctx.registry.verify(id)).custodyIntact, false);
+
+    await ctx.registry.connect(ctx.processor).counterTransfer(id, COUNTER_TERMS, "");
+    assert.equal((await ctx.registry.verify(id)).custodyIntact, false, "a deal mid-negotiation is still open");
+
+    await ctx.registry.connect(ctx.farmer).acceptTransfer(id, "", COUNTER_TERMS);
+    assert.equal((await ctx.registry.verify(id)).custodyIntact, true);
+  });
+
+  it("leaves nothing outstanding on a cancelled deal", async () => {
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", TERMS);
+    await ctx.registry.connect(ctx.processor).counterTransfer(id, COUNTER_TERMS, "");
+    await ctx.registry.connect(ctx.farmer).cancelTransfer(id);
+
+    const [h] = await ctx.registry.getHandovers(id);
+    assert.equal(h.cancelled, true);
+    assert.equal(h.awaiting, ethers.ZeroAddress);
+    assert.equal((await ctx.registry.verify(id)).custodyIntact, true, "a walked-away deal is not a custody gap");
+    await expectRevert(ctx.registry.connect(ctx.processor).counterTransfer(id, TERMS, ""), "NoPendingTransfer");
   });
 });
 
@@ -318,8 +403,8 @@ describe("Lifecycle", () => {
   beforeEach(async () => {
     ctx = await deployStack();
     id = await createBatch(ctx.registry, ctx.farmer);
-    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", ZERO_HASH);
-    await ctx.registry.connect(ctx.processor).acceptTransfer(id, "");
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", TERMS);
+    await ctx.registry.connect(ctx.processor).acceptTransfer(id, "", TERMS);
   });
 
   it("advances stages in order for the right role", async () => {
@@ -344,8 +429,8 @@ describe("Lifecycle", () => {
   });
 
   it("records partial sales and closes the lot when it is exhausted", async () => {
-    await ctx.registry.connect(ctx.processor).proposeTransfer(id, ctx.retailer.address, "", "", ZERO_HASH);
-    await ctx.registry.connect(ctx.retailer).acceptTransfer(id, "");
+    await ctx.registry.connect(ctx.processor).proposeTransfer(id, ctx.retailer.address, "", "", TERMS);
+    await ctx.registry.connect(ctx.retailer).acceptTransfer(id, "", TERMS);
 
     await ctx.registry.connect(ctx.retailer).recordSale(id, 400n, ZERO_HASH);
     assert.equal(await ctx.registry.soldQuantity(id), 400n);
@@ -358,8 +443,8 @@ describe("Lifecycle", () => {
   });
 
   it("refuses to sell more than the lot holds", async () => {
-    await ctx.registry.connect(ctx.processor).proposeTransfer(id, ctx.retailer.address, "", "", ZERO_HASH);
-    await ctx.registry.connect(ctx.retailer).acceptTransfer(id, "");
+    await ctx.registry.connect(ctx.processor).proposeTransfer(id, ctx.retailer.address, "", "", TERMS);
+    await ctx.registry.connect(ctx.retailer).acceptTransfer(id, "", TERMS);
     await expectRevert(ctx.registry.connect(ctx.retailer).recordSale(id, 1001n, ZERO_HASH), "QuantityMismatch");
   });
 });
@@ -550,8 +635,8 @@ describe("Transformation", () => {
 
   it("refuses to merge lots held by someone else", async () => {
     const second = await createBatch(ctx.registry, ctx.farmer, { quantity: 500n });
-    await ctx.registry.connect(ctx.farmer).proposeTransfer(second, ctx.processor.address, "", "", ZERO_HASH);
-    await ctx.registry.connect(ctx.processor).acceptTransfer(second, "");
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(second, ctx.processor.address, "", "", TERMS);
+    await ctx.registry.connect(ctx.processor).acceptTransfer(second, "", TERMS);
     await expectRevert(ctx.registry.connect(ctx.farmer).mergeBatches([id, second], "", ZERO_HASH), "NotCustodian");
   });
 
@@ -633,7 +718,7 @@ describe("Recall", () => {
   it("freezes a recalled lot against movement and sale", async () => {
     await ctx.registry.connect(ctx.inspector).initiateRecall(children[0], 3, "contaminated");
     await expectRevert(
-      ctx.registry.connect(ctx.farmer).proposeTransfer(children[0], ctx.processor.address, "", "", ZERO_HASH),
+      ctx.registry.connect(ctx.farmer).proposeTransfer(children[0], ctx.processor.address, "", "", TERMS),
       "BatchRecalled"
     );
     await expectRevert(ctx.registry.connect(ctx.farmer).splitBatch(children[0], [300n, 300n]), "BatchRecalled");
@@ -661,10 +746,10 @@ describe("Verification and pause", () => {
   });
 
   it("reports custody as broken while a handover sits unaccepted", async () => {
-    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", ZERO_HASH);
+    await ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", TERMS);
     assert.equal((await ctx.registry.verify(id)).custodyIntact, false);
 
-    await ctx.registry.connect(ctx.processor).acceptTransfer(id, "");
+    await ctx.registry.connect(ctx.processor).acceptTransfer(id, "", TERMS);
     const v = await ctx.registry.verify(id);
     assert.equal(v.custodyIntact, true);
     assert.equal(Number(v.chainLength), 1);
@@ -679,7 +764,7 @@ describe("Verification and pause", () => {
     await ctx.registry.connect(ctx.admin).setPaused(true);
     await expectRevert(ctx.registry.connect(ctx.farmer).createBatch(batchInput()), "Paused");
     await expectRevert(
-      ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", ZERO_HASH),
+      ctx.registry.connect(ctx.farmer).proposeTransfer(id, ctx.processor.address, "", "", TERMS),
       "Paused"
     );
 

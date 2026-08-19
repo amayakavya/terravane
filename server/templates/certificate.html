@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Certificate {{CERT_NUMBER}} · Terravane</title>
+<style>
+  /* Landscape-minded and self-contained: this one gets printed and pinned up.
+     Same rule as the invoice — no external font, stylesheet or script. */
+  :root {
+    --ink: #1c2420;
+    --muted: #5b6058;
+    --rule: #dcd5bf;
+    --deep: #04241a;
+    --gold: #b6863b;
+    --gold-soft: #e7d3a8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 20px 64px;
+    background: #f1ede0;
+    color: var(--ink);
+    font: 15px/1.6 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .sheet {
+    max-width: 250mm;
+    margin: 0 auto;
+    background: #fff;
+    border: 1px solid var(--rule);
+    padding: 10px;
+  }
+  .inner { border: 2px solid var(--deep); padding: 40px 46px 34px; position: relative; }
+  .inner::after {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    border: 1px solid var(--gold);
+    pointer-events: none;
+  }
+  .crest { text-align: center; margin-bottom: 26px; }
+  .crest .brand { font-size: 11px; letter-spacing: .34em; text-transform: uppercase; color: var(--muted); }
+  .crest svg { display: block; margin: 10px auto 0; }
+  h1 {
+    text-align: center;
+    font-size: 38px;
+    font-weight: 500;
+    letter-spacing: -.01em;
+    margin: 14px 0 4px;
+  }
+  .scheme {
+    text-align: center;
+    font-size: 20px;
+    color: var(--gold);
+    margin: 0 0 4px;
+    letter-spacing: .02em;
+  }
+  .status {
+    text-align: center;
+    font-size: 10px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--muted);
+    margin: 0 0 26px;
+  }
+  .status.void { color: #8c2f26; }
+  .recital { text-align: center; max-width: 620px; margin: 0 auto 30px; color: var(--muted); font-size: 15px; }
+  .recital strong { color: var(--ink); }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px 40px;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 24px 0;
+    margin-bottom: 26px;
+  }
+  .label {
+    font-size: 10px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    margin: 0 0 4px;
+  }
+  .value { margin: 0; font-size: 16px; }
+  .foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 34px; }
+  .signature { flex: 1; min-width: 0; }
+  .signature .rule { border-top: 1px solid var(--ink); margin-top: 34px; padding-top: 8px; }
+  .hash { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 10px; color: var(--muted); word-break: break-all; margin: 4px 0 0; }
+  .qr { width: 112px; flex-shrink: 0; text-align: center; }
+  .qr svg { width: 112px; height: 112px; display: block; }
+  .qr p { margin: 6px 0 0; font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  @media print {
+    body { background: #fff; padding: 0; }
+    .sheet { border: 0; max-width: none; padding: 0; }
+    @page { size: landscape; margin: 12mm; }
+  }
+  @media (max-width: 700px) {
+    .grid { grid-template-columns: 1fr; }
+    .foot { flex-direction: column; align-items: flex-start; }
+    .inner { padding: 26px 22px; }
+    h1 { font-size: 28px; }
+  }
+</style>
+</head>
+<body>
+<article class="sheet">
+  <div class="inner">
+
+    <div class="crest">
+      <p class="brand">Terravane</p>
+      <!-- The mark is pale on dark by design, so on white paper it sits on its
+           own ground rather than washing out into the page. -->
+      <svg width="54" height="54" viewBox="0 0 64 64" aria-hidden="true">
+        <rect width="64" height="64" rx="12" fill="#04241a"/>
+        <path d="M32 12c7 4 10 11 8 20H24c-2-9 1-16 8-20z" fill="#e7d3a8"/>
+        <path d="M16 42c6-4 11-6 16-6s10 2 16 6l-3 4c-5-3-8-4-13-4s-8 1-13 4z" fill="#b6863b"/>
+      </svg>
+    </div>
+
+    <h1>Certificate of Compliance</h1>
+    <p class="scheme">{{SCHEME}}</p>
+    <p class="status {{STATUS_CLASS}}">{{STATUS}}</p>
+
+    <p class="recital">
+      This certifies that lot <strong>#{{LOT_ID}}</strong>, <strong>{{PRODUCE}}</strong>, grown by
+      <strong>{{ORIGIN_FARM}}</strong> of {{ORIGIN_LOCATION}} and harvested on {{HARVESTED_ON}},
+      was assessed against the scheme named above and recorded as compliant on the Terravane ledger
+      by <strong>{{CERTIFIER_NAME}}</strong>.
+    </p>
+
+    <div class="grid">
+      <div><p class="label">Certificate number</p><p class="value">{{CERT_NUMBER}}</p></div>
+      <div><p class="label">Quantity certified</p><p class="value">{{QUANTITY}}</p></div>
+      <div><p class="label">Issued on</p><p class="value">{{ISSUED_ON}}</p></div>
+      <div><p class="label">Valid until</p><p class="value">{{EXPIRES_ON}}</p></div>
+      <div><p class="label">Issuing body</p><p class="value">{{CERTIFIER_NAME}}</p></div>
+      <div><p class="label">Evidence on file</p><p class="value">{{EVIDENCE_URI}}</p></div>
+    </div>
+
+    <div class="foot">
+      <div class="signature">
+        <p class="label">Recorded on chain</p>
+        <p class="hash">certifier {{CERTIFIER_ADDRESS}}</p>
+        <p class="hash">evidence {{EVIDENCE_HASH}}</p>
+        <p class="hash">verify {{VERIFY_URL}}</p>
+        <div class="rule">
+          <p class="value">{{CERTIFIER_NAME}}</p>
+          <p class="label" style="margin-top:4px">Authorised certifier · {{ISSUED_ON}}</p>
+        </div>
+      </div>
+      <div class="qr">
+        {{{QR_SVG}}}
+        <p>Verify lot</p>
+      </div>
+    </div>
+
+  </div>
+</article>
+</body>
+</html>

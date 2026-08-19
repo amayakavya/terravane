@@ -1,6 +1,7 @@
 import { ethers } from "ethers";
 import { contracts, RPC_URL, wallet } from "../scripts/lib/chain.js";
 import { advanceRoute, clearRoute, getRoute, setRoute } from "./db.js";
+import { dealTerms } from "./documents.js";
 
 /// The server holds development private keys so the console can act as any
 /// participant without a browser wallet. That is only ever acceptable against a
@@ -96,25 +97,80 @@ export function mountActions(app, { deployment, provider, indexer, documents, db
     return { ...receipt, batchId: Number(await registry.batchCount()), attributes, metadataHash, metadataURI };
   }));
 
-  app.post("/api/actions/batches/:id/transfer", action(async (req) => {
-    const { registry } = boundContracts(req.body.as);
-    const { participant: recipient } = signerFor(req.required("to"));
-    return settle(
-      registry.proposeTransfer(
-        Number(req.params.id),
-        recipient.address,
-        req.body.geohash ?? "",
-        req.body.note ?? "",
-        req.body.documentHash ?? ethers.id(req.body.note ?? "handover")
-      )
+  /// Write the deal to the document store, then offer it. The chain only ever
+  /// sees the digest; what the two sides are actually agreeing to lives here,
+  /// and cannot be edited afterwards without the digest ceasing to match.
+  async function offerTerms(registry, batchId, from, to, fields) {
+    const b = await registry.getBatch(batchId);
+    return documents.put(
+      dealTerms({
+        batchId,
+        produce: `${b.produceType}${b.variety ? ` ${b.variety}` : ""}`,
+        quantity: Number(b.quantity),
+        unit: b.unit,
+        seller: from.name,
+        buyer: to.name,
+        offeredBy: from.address,
+        ...fields
+      })
     );
+  }
+
+  app.post("/api/actions/batches/:id/transfer", action(async (req) => {
+    const { registry, participant } = boundContracts(req.body.as);
+    const { participant: recipient } = signerFor(req.required("to"));
+    const id = Number(req.params.id);
+
+    const agreed = await offerTerms(registry, id, participant, recipient, {
+      pricePerUnit: req.body.pricePerUnit ?? 0,
+      currency: req.body.currency ?? "INR",
+      paymentTerms: req.body.paymentTerms ?? "",
+      deliverBy: req.body.deliverBy ?? "",
+      note: req.body.note ?? ""
+    });
+
+    const receipt = await settle(
+      registry.proposeTransfer(id, recipient.address, req.body.geohash ?? "", req.body.note ?? "", agreed.hash)
+    );
+    return { ...receipt, terms: agreed.body, termsHash: agreed.hash, termsURI: agreed.uri };
+  }));
+
+  /// The other half of the handshake's alternative: answer an offer with your
+  /// own numbers. Whoever was being asked to sign becomes the one asking.
+  app.post("/api/actions/batches/:id/counter", action(async (req) => {
+    const { registry, participant } = boundContracts(req.body.as);
+    const id = Number(req.params.id);
+
+    const [pending, to, awaiting] = await registry.pendingTransfer(id);
+    if (!pending) throw new HttpError(400, "there is no open deal on this lot");
+    if (awaiting.toLowerCase() !== participant.address.toLowerCase()) {
+      throw new HttpError(400, "the deal is not waiting on you");
+    }
+
+    const custodian = (await registry.getBatch(id)).custodian;
+    const seller = roster.find((p) => p.address.toLowerCase() === custodian.toLowerCase());
+    const buyer = roster.find((p) => p.address.toLowerCase() === to.toLowerCase());
+
+    const agreed = await offerTerms(registry, id, seller ?? participant, buyer ?? participant, {
+      pricePerUnit: req.body.pricePerUnit ?? 0,
+      currency: req.body.currency ?? "INR",
+      paymentTerms: req.body.paymentTerms ?? "",
+      deliverBy: req.body.deliverBy ?? "",
+      note: req.body.note ?? "",
+      // Who put these numbers on the table, which after a counter is no longer
+      // the seller — the invoice at the end has to say so.
+      offeredBy: participant.address
+    });
+
+    const receipt = await settle(registry.counterTransfer(id, agreed.hash, req.body.note ?? ""));
+    return { ...receipt, terms: agreed.body, termsHash: agreed.hash, termsURI: agreed.uri };
   }));
 
   /// A plan is nothing but the first hop of an ordinary transfer, remembered. It
   /// buys nobody's signature in advance — accept still has to happen, at every
   /// step, by the party actually holding the lot at the time.
   app.post("/api/actions/batches/:id/route", action(async (req) => {
-    const { registry } = boundContracts(req.body.as);
+    const { registry, participant } = boundContracts(req.body.as);
     const id = Number(req.params.id);
     const steps = req.required("steps")
       .map((s) => String(s).trim())
@@ -122,17 +178,22 @@ export function mountActions(app, { deployment, provider, indexer, documents, db
       .map((s) => signerFor(s).participant.address);
     if (!steps.length) throw new HttpError(400, "a route needs at least one stop");
 
+    const agreed = await routeTerms(registry, id, participant, steps[0], req.body.note || "planned route");
     const receipt = await settle(
-      registry.proposeTransfer(id, steps[0], req.body.geohash ?? "", req.body.note || "planned route", ethers.id(`route:${id}:0`))
+      registry.proposeTransfer(id, steps[0], req.body.geohash ?? "", req.body.note || "planned route", agreed.hash)
     );
     setRoute(db, id, steps, req.body.as);
     return { ...receipt, route: getRoute(db, id) };
   }));
 
+  /// The caller signs the digest they were shown, not whatever is currently on
+  /// chain. If the other side countered in between, the chain rejects it as a
+  /// mismatch rather than quietly signing them up to terms they never read.
   app.post("/api/actions/batches/:id/accept", action(async (req) => {
     const id = Number(req.params.id);
     const { registry } = boundContracts(req.body.as);
-    return settle(registry.acceptTransfer(id, req.body.geohash ?? ""));
+    const termsHash = req.body.termsHash ?? (await registry.pendingTransfer(id))[3];
+    return settle(registry.acceptTransfer(id, req.body.geohash ?? "", termsHash));
   }));
 
   /// A route plan does not skip the holder's own work — it just tells them
@@ -141,18 +202,31 @@ export function mountActions(app, { deployment, provider, indexer, documents, db
   /// certify a lot before choosing to move it on.
   app.post("/api/actions/batches/:id/route/continue", action(async (req) => {
     const id = Number(req.params.id);
-    const { registry } = boundContracts(req.body.as);
+    const { registry, participant } = boundContracts(req.body.as);
     const route = getRoute(db, id);
     if (!route) throw new HttpError(400, "this lot has no planned route");
     if (route.nextIndex >= route.steps.length) throw new HttpError(400, "the planned route is already complete");
 
     const to = route.steps[route.nextIndex];
+    const agreed = await routeTerms(registry, id, participant, to, req.body.note || "continuing planned route");
     const receipt = await settle(
-      registry.proposeTransfer(id, to, req.body.geohash ?? "", req.body.note || "continuing planned route", ethers.id(`route:${id}:${route.nextIndex}`))
+      registry.proposeTransfer(id, to, req.body.geohash ?? "", req.body.note || "continuing planned route", agreed.hash)
     );
     const remaining = advanceRoute(db, id);
     return { ...receipt, forwardedTo: to, routeComplete: !remaining };
   }));
+
+  /// A planned hop is still a deal — the receiving side still has to sign it —
+  /// but a route plan carries no price, so it says so in as many words rather
+  /// than inventing one nobody agreed to.
+  function routeTerms(registry, batchId, from, toAddress, note) {
+    const to = roster.find((p) => p.address.toLowerCase() === toAddress.toLowerCase());
+    return offerTerms(registry, batchId, from, to ?? { name: toAddress }, {
+      pricePerUnit: 0,
+      paymentTerms: "No price agreed; movement under a planned route",
+      note
+    });
+  }
 
   app.post("/api/actions/batches/:id/cancel", action(async (req) => {
     const id = Number(req.params.id);

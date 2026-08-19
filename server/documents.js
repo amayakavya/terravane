@@ -34,6 +34,35 @@ export function hashFromUri(uri) {
   return match ? match[1].toLowerCase() : null;
 }
 
+// The commercial half of a handover. The contract only ever sees this
+// document's digest; both sides sign that digest, so neither can restate the
+// bargain afterwards, and the invoice at the end is rendered from the same
+// bytes the ledger committed to rather than from anybody's later account of
+// what was agreed.
+export function dealTerms(fields) {
+  const quantity = Number(fields.quantity ?? 0);
+  const pricePerUnit = Number(fields.pricePerUnit ?? 0);
+  return {
+    kind: "terms",
+    batchId: Number(fields.batchId),
+    produce: fields.produce ?? "",
+    quantity,
+    unit: fields.unit ?? "",
+    pricePerUnit,
+    currency: fields.currency ?? "INR",
+    // Stated, not left to be recomputed by whoever reads it later: the total is
+    // part of what was agreed, so it is part of what was signed.
+    total: Number((quantity * pricePerUnit).toFixed(2)),
+    paymentTerms: fields.paymentTerms ?? "",
+    deliverBy: fields.deliverBy ?? "",
+    seller: fields.seller ?? "",
+    buyer: fields.buyer ?? "",
+    note: fields.note ?? "",
+    offeredBy: fields.offeredBy ?? "",
+    offeredAt: fields.offeredAt ?? new Date().toISOString()
+  };
+}
+
 export class DocumentStore {
   constructor(db) {
     this.db = db;

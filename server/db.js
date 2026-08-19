@@ -10,7 +10,24 @@ export function openDatabase(file = path.join(ROOT, "data", "index.db")) {
   const db = new Database(file);
   db.pragma("journal_mode = WAL");
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+/// CREATE TABLE IF NOT EXISTS does nothing for a table that already exists but
+/// has since grown a column, and this index survives across runs. Everything in
+/// here is derived, so a column that arrives empty fills itself on the next
+/// resync rather than needing a backfill.
+function migrate(db) {
+  const columns = new Set(db.prepare("PRAGMA table_info(batches)").all().map((c) => c.name));
+  const wanted = [
+    ["pending_awaiting", "TEXT"],
+    ["pending_terms", "TEXT"],
+    ["pending_round", "INTEGER"]
+  ];
+  for (const [name, decl] of wanted) {
+    if (!columns.has(name)) db.exec(`ALTER TABLE batches ADD COLUMN ${name} ${decl}`);
+  }
 }
 
 const SCHEMA = `
@@ -42,6 +59,11 @@ CREATE TABLE IF NOT EXISTS batches (
   origin_farm        TEXT,
   custodian          TEXT,
   pending_custodian  TEXT,
+  -- The open deal, mirrored off chain so a desk can be asked "what is waiting
+  -- on me" in one query instead of one RPC call per lot it might be.
+  pending_awaiting   TEXT,
+  pending_terms      TEXT,
+  pending_round      INTEGER,
   stage              INTEGER,
   recalled           INTEGER,
   cold_chain_required INTEGER,

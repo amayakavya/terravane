@@ -111,6 +111,13 @@ const PAGES = [
   { path: "/inspect.html", needs: [], selector: "#main", auth: "inspector", shot: "inspect" },
   { path: "/regulator.html", needs: [], selector: "#main", auth: "admin", shot: "regulator" },
   { path: "/notifications.html", needs: [], selector: "#main", auth: true },
+  // The custody-free desks, which have no inventory of their own to render.
+  { path: "/certify.html", needs: [], selector: "#main", auth: "certifier" },
+  { path: "/telemetry.html", needs: [], selector: "#main", auth: "oracle" },
+  // Lot 14 is seeded mid-negotiation, so both sides of the handshake get drawn:
+  // the farm owes the signature, the haulier is the one waiting for it.
+  { path: "/lot.html?id=14&tab=actions", needs: ["Deal on the table", "Waiting on your signature"], selector: "#tab-body", auth: "farmer", shot: "deal" },
+  { path: "/lot.html?id=14&tab=overview", needs: ["Deal on the table", "Waiting on"], selector: "#tab-body", auth: "distributor" },
   { path: "/trace.html?id=5", needs: ["Mango"], selector: "#root", auth: false, shot: "trace", width: 900 },
   { path: "/trace.html?id=9", needs: [], selector: "#root", auth: false },
   { path: "/label.html?id=5", needs: ["LOT"], selector: "#root", auth: false, shot: "label", width: 900 }
@@ -149,9 +156,16 @@ async function main() {
     const identities = {
       true: pick("farmer") ?? participants[0],
       farmer: pick("farmer"),
-      inspector: pick("inspector")
+      inspector: pick("inspector"),
+      admin: pick("admin"),
+      certifier: pick("certifier"),
+      oracle: pick("oracle"),
+      // The haulier holding the other end of the seeded deal, specifically.
+      distributor: participants.find((p) => p.name === "Coldline Logistics") ?? pick("distributor")
     };
-    if (!identities.farmer || !identities.inspector) throw new Error("chain has no farmer or inspector to act as");
+    for (const role of ["farmer", "inspector", "admin", "certifier", "oracle", "distributor"]) {
+      if (!identities[role]) throw new Error(`chain has no ${role} to act as`);
+    }
 
     console.log(`checking ${PAGES.length} pages against ${BASE}\n`);
 

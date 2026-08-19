@@ -2,6 +2,7 @@ import { api, CUSTODY_ROLES } from "./api.js";
 import { add, card, cardHeader, clear, el, icon, isClosed, mount, page, renderShell, t } from "./ui.js";
 import { lotTable, statTile } from "./lot-table.js";
 import { networkMap } from "./map.js";
+import { briefingCard } from "./briefing.js";
 
 // One dashboard that reads the signed-in participant's roles, rather than four
 // near-identical pages that drift. What changes between a farmer and an
@@ -105,6 +106,10 @@ async function main_() {
 
     mount(main, 
       hero(me, { held: held.length, inTransit, attention }),
+
+      // Reads the desk's own figures and, where a local model is answering,
+      // says them back in a sentence. Draws itself in; nothing below waits on it.
+      briefingCard(me),
 
       awaiting.length
         ? card([

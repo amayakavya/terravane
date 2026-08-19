@@ -140,6 +140,78 @@ async function main() {
   const dossier = (await api(`/api/batches/${newId}`)).body;
   check("custody moved in the index", dossier.batch.custodian.name === "Coldline Logistics", dossier.batch.custodian?.name);
 
+  console.log("\nthe handshake");
+  // Both halves have to land on the same terms, and the terms are a real
+  // document, not an opaque nonce. This is the whole of what makes a handover
+  // an agreement rather than a push.
+  const second = await post("/api/actions/batches", { as: "Sundar Farms", produceType: "Brinjal", quantity: 400, unit: "kg" });
+  const negotiated = second.body.batchId;
+
+  const offer = await post(`/api/actions/batches/${negotiated}/transfer`, {
+    as: "Sundar Farms",
+    to: "Coldline Logistics",
+    pricePerUnit: 30,
+    paymentTerms: "Net 30",
+    note: "smoke offer"
+  });
+  check("an offer carries a terms document", /^0x[0-9a-f]{64}$/.test(offer.body.termsHash ?? ""), JSON.stringify(offer.body.error ?? offer.body.termsHash));
+  check("the terms state the total that was agreed", offer.body.terms?.total === 400 * 30, JSON.stringify(offer.body.terms?.total));
+
+  const staleTerms = offer.body.termsHash;
+  const counterOffer = await post(`/api/actions/batches/${negotiated}/counter`, {
+    as: "Coldline Logistics",
+    pricePerUnit: 26,
+    paymentTerms: "Net 15",
+    note: "26 or nothing"
+  });
+  check("the receiving side may counter", counterOffer.status === 200, JSON.stringify(counterOffer.body));
+  check("a counter changes the terms digest", counterOffer.body.termsHash !== staleTerms);
+
+  const wrongWay = await post(`/api/actions/batches/${negotiated}/counter`, { as: "Coldline Logistics", pricePerUnit: 25 });
+  check("the side now being asked cannot counter its own counter", wrongWay.status === 400, JSON.stringify(wrongWay.body));
+
+  const staleAccept = await post(`/api/actions/batches/${negotiated}/accept`, { as: "Sundar Farms", termsHash: staleTerms });
+  check("signing superseded terms is refused", staleAccept.status === 400 && staleAccept.body.error === "TermsMismatch", JSON.stringify(staleAccept.body));
+
+  const wrongSigner = await post(`/api/actions/batches/${negotiated}/accept`, { as: "MetroMart", termsHash: counterOffer.body.termsHash });
+  check("only the party being asked may sign", wrongSigner.status === 400 && wrongSigner.body.error === "NotAwaiting", JSON.stringify(wrongSigner.body));
+
+  const settled = await post(`/api/actions/batches/${negotiated}/accept`, { as: "Sundar Farms", termsHash: counterOffer.body.termsHash });
+  check("signing the terms on the table settles the deal", settled.status === 200, JSON.stringify(settled.body));
+  const afterDeal = (await api(`/api/batches/${negotiated}`)).body;
+  check("custody moved to the buyer, not to the signer", afterDeal.batch.custodian.name === "Coldline Logistics", afterDeal.batch.custodian?.name);
+  check("the settled handover records the round it took", afterDeal.handovers[0].round === 2, String(afterDeal.handovers[0].round));
+  check("nothing is left outstanding once signed", afterDeal.handovers[0].open === false);
+
+  const seededDeal = (await api(`/api/batches/${TOMATO}`)).body;
+  check("the seeded lot is mid-negotiation", seededDeal.handovers[0].open === true && seededDeal.handovers[0].round === 2, JSON.stringify(seededDeal.handovers[0].round));
+  check("and says whose signature it waits on", seededDeal.handovers[0].awaiting?.name === "Sundar Farms", seededDeal.handovers[0].awaiting?.name);
+
+  console.log("\nprinted documents");
+  const invoice = await api(`/api/batches/${negotiated}/invoice/0`);
+  check("an invoice renders for a settled deal", invoice.status === 200 && invoice.body.includes("<h1>Invoice</h1>"));
+  check("the invoice carries the agreed total, not the opening one", invoice.body.includes("10,400.00"), "400 x 26");
+  check("the invoice leaves no placeholder unfilled", !invoice.body.includes("{{"));
+  check("the invoice carries a scannable code", invoice.body.includes("<svg"));
+  check("an unsettled deal has no invoice", (await api(`/api/batches/${TOMATO}/invoice/0`)).status === 409);
+  check("an unknown handover has no invoice", (await api(`/api/batches/${negotiated}/invoice/9`)).status === 404);
+
+  const certificate = await api(`/api/batches/${RICE}/certificate/0`);
+  check("a certificate renders for a recorded certification", certificate.status === 200 && certificate.body.includes("Certificate of Compliance"));
+  check("the certificate leaves no placeholder unfilled", !certificate.body.includes("{{"));
+  check("an unknown certification has no certificate", (await api(`/api/batches/${RICE}/certificate/9`)).status === 404);
+
+  console.log("\ndesk briefing");
+  // The figures are the load-bearing half and must not depend on a model being
+  // installed, running, or fast. Nothing in this block asks for prose.
+  const desk = (await api(`/api/desk?as=${farmer.address}&summarise=0`)).body;
+  check("the desk briefing counts without a model", Array.isArray(desk.facts) && desk.facts.length > 0, String(desk.facts?.length));
+  check("the briefing names the desk it is for", desk.participant?.name === farmer.name, desk.participant?.name);
+  check("the briefing surfaces a signature the desk owes", desk.facts.some((f) => /waiting on your signature/i.test(f.label)));
+  check("no prose is claimed when none was asked for", desk.summary === null);
+  check("the desk briefing needs an address", (await api("/api/desk")).status === 400);
+  check("health reports whether a model is available", typeof health.ai?.enabled === "boolean", JSON.stringify(health.ai));
+
   console.log("\nrefusals");
   const wrongRole = await post(`/api/actions/batches/${newId}/stage`, { as: "Coldline Logistics", stage: 1 });
   check("processing by a distributor is refused", wrongRole.status === 400 && wrongRole.body.error === "NotAuthorised", JSON.stringify(wrongRole.body));

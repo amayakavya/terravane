@@ -5,7 +5,7 @@ import { ethers } from "ethers";
 import { contracts, provider, readDeployment, wallet } from "./lib/chain.js";
 import { encodeGeohash } from "./lib/geohash.js";
 import { openDatabase } from "../server/db.js";
-import { DocumentStore } from "../server/documents.js";
+import { dealTerms, DocumentStore } from "../server/documents.js";
 
 const deployment = readDeployment();
 const prov = provider();
@@ -70,10 +70,30 @@ function lot(overrides) {
   };
 }
 
-/** Move a lot from its holder to `to` and settle it in one step. */
-async function handover(from, to, batchId, note, geo) {
-  await send(`handover #${batchId}  ${from.name} -> ${to.name}`, from.registry.proposeTransfer(batchId, to.address, geo, note, hash(note)));
-  await send(`accept   #${batchId}  ${to.name}`, to.registry.acceptTransfer(batchId, geo));
+/// Write the deal both sides are about to sign into the document store and hand
+/// back the digest the chain will carry. Same path the console takes, so a
+/// seeded handover produces a real invoice rather than a placeholder one.
+async function terms(from, to, batchId, fields) {
+  const b = await from.registry.getBatch(batchId);
+  return documents.put(
+    dealTerms({
+      batchId,
+      produce: `${b.produceType}${b.variety ? ` ${b.variety}` : ""}`,
+      quantity: Number(b.quantity),
+      unit: b.unit,
+      seller: from.name,
+      buyer: to.name,
+      offeredBy: from.address,
+      ...fields
+    })
+  );
+}
+
+/** Move a lot from its holder to `to`: offer, countersign, settled. */
+async function handover(from, to, batchId, note, geo, deal = {}) {
+  const agreed = await terms(from, to, batchId, { note, paymentTerms: "Net 30", pricePerUnit: 24, ...deal });
+  await send(`offer    #${batchId}  ${from.name} -> ${to.name}`, from.registry.proposeTransfer(batchId, to.address, geo, note, agreed.hash));
+  await send(`accept   #${batchId}  ${to.name}`, to.registry.acceptTransfer(batchId, geo, agreed.hash));
 }
 
 const STAGE = { Harvested: 0, Processed: 1, Packed: 2, InTransit: 3, AtRetail: 4 };
@@ -260,11 +280,17 @@ async function main() {
     { pricePerUnit: 28, currency: "INR", grade: "B", organic: false, storage: "Cool, ventilated", expiresAt: "2026-08-24" }
   );
   await send(`telemetry #${tomatoes} 12.4C`, sundar.registry.recordTelemetry(tomatoes, 124, 850, sundar.geohash, hash("tlm-tom-1"), 0));
-  await send(`handover #${tomatoes} offered to Coldline (unaccepted)`, sundar.registry.proposeTransfer(tomatoes, coldline.address, sundar.geohash, "Awaiting pickup", hash("open-1")));
+  // One deal left mid-negotiation on purpose: Sundar offers, Coldline answers
+  // with its own number, and the lot sits where it is until Sundar signs that
+  // number or walks away. This is the state the console has to show honestly.
+  const offered = await terms(sundar, coldline, tomatoes, { note: "Awaiting pickup", pricePerUnit: 28, paymentTerms: "Net 30", deliverBy: "2026-08-22" });
+  await send(`offer    #${tomatoes} Sundar Farms -> Coldline @28`, sundar.registry.proposeTransfer(tomatoes, coldline.address, sundar.geohash, "Awaiting pickup", offered.hash));
+  const countered = await terms(sundar, coldline, tomatoes, { note: "Cold run to Vashi, 26 or nothing", pricePerUnit: 26, paymentTerms: "Net 15", deliverBy: "2026-08-22", offeredBy: coldline.address });
+  await send(`counter  #${tomatoes} Coldline @26 (unsigned)`, coldline.registry.counterTransfer(tomatoes, countered.hash, "Cold run to Vashi, 26 or nothing"));
 
   const total = Number(await sundar.registry.batchCount());
   console.log(`\nseeded ${txCount} transactions, ${total} batches on chain`);
-  console.log(`recalled tea root #${tea}, cold-chain breach on mango #${mango}, open handover on #${tomatoes}`);
+  console.log(`recalled tea root #${tea}, cold-chain breach on mango #${mango}, deal under negotiation on #${tomatoes}`);
 }
 
 main().catch((err) => {

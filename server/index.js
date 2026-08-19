@@ -1,12 +1,15 @@
 import path from "node:path";
 import express from "express";
 import QRCode from "qrcode";
-import { contracts, provider, readDeployment, ROOT, RPC_URL, STAGE_NAMES } from "../scripts/lib/chain.js";
+import { contracts, loadArtifact, provider, readDeployment, ROOT, RPC_URL, STAGE_NAMES } from "../scripts/lib/chain.js";
 import { decodeGeohash } from "../scripts/lib/geohash.js";
 import { getMeta, getRoute, openDatabase } from "./db.js";
 import { Indexer } from "./indexer.js";
 import { mountActions, signingEnabled } from "./actions.js";
 import { DocumentStore, mountDocuments } from "./documents.js";
+import { attachmentName, render } from "./render.js";
+import { briefingLines, deskBriefing } from "./desk.js";
+import { aiEnabled, aiStatus, summariseDesk } from "./ai.js";
 
 const PORT = Number(process.env.PORT ?? 4300);
 const deployment = readDeployment();
@@ -68,6 +71,11 @@ function shapeBatch(row) {
     },
     custodian: who(row.custodian),
     pendingCustodian: who(row.pending_custodian),
+    // Who owes the next signature on the open deal, and on what. Null when the
+    // lot is not mid-handshake.
+    deal: row.pending_custodian
+      ? { to: who(row.pending_custodian), awaiting: who(row.pending_awaiting), termsHash: row.pending_terms, round: row.pending_round }
+      : null,
     metadataURI: row.metadata_uri,
     metadataHash: row.metadata_hash,
     counts: {
@@ -118,7 +126,8 @@ async function dossier(id) {
   return {
     batch: shapeBatch(row),
     attributes: documents.resolve(row.metadata_uri, row.metadata_hash),
-    handovers: handovers.map((h) => ({
+    handovers: handovers.map((h, index) => ({
+      index,
       from: who(h.from),
       to: who(h.to),
       proposedAt: num(h.proposedAt),
@@ -126,9 +135,16 @@ async function dossier(id) {
       geohash: h.geohash,
       position: decodeGeohash(h.geohash),
       note: h.note,
-      documentHash: h.documentHash,
+      // The digest is what the chain holds; the terms themselves are resolved
+      // out of the document store so the console can show what was signed
+      // rather than a hash nobody can read.
+      termsHash: h.termsHash,
+      terms: documents.get(h.termsHash)?.body ?? null,
+      awaiting: who(h.awaiting),
+      round: Number(h.round),
       accepted: h.accepted,
-      cancelled: h.cancelled
+      cancelled: h.cancelled,
+      open: h.awaiting !== "0x0000000000000000000000000000000000000000"
     })),
     certifications: certs.map(shapeCert),
     farmCertifications: farmCerts.map(shapeCert),
@@ -240,7 +256,7 @@ app.get("/api/health", async (_req, res) => {
     chainError = err.message;
   }
   res.json({
-    ok: chainError === null && indexer.ready,
+    ok: chainError === null && indexer.ready && codeDrift === null,
     ready: indexer.ready,
     rpc: RPC_URL,
     chainId: deployment.chainId,
@@ -250,8 +266,35 @@ app.get("/api/health", async (_req, res) => {
     syncedAt: Number(getMeta(db, "syncedAt", "0")) || null,
     indexerError: indexer.lastError,
     chainError,
-    signingEnabled: signingEnabled()
+    contractMismatch: codeDrift,
+    signingEnabled: signingEnabled(),
+    // Never blocks: see the note on aiStatus. Health is polled every eight seconds.
+    ai: await aiStatus({ wait: false })
   });
+});
+
+/// The desk briefing. The figures are counted here and always returned; the
+/// prose is a local model's rendering of those same figures and may be absent,
+/// which the console is built to expect rather than to hide.
+app.get("/api/desk", async (req, res) => {
+  const address = String(req.query.as ?? "");
+  if (!address) return res.status(400).json({ error: "an address is required" });
+  const participant = who(address);
+  if (!participant?.name) return res.status(404).json({ error: "no such participant" });
+
+  const briefing = deskBriefing(db, participant);
+  const lines = briefingLines(briefing);
+
+  if (!aiEnabled() || req.query.summarise === "0") {
+    return res.json({ ...briefing, summary: null, model: null, reason: aiEnabled() ? "not requested" : "switched off" });
+  }
+
+  const { text, model, reason, cached } = await summariseDesk({
+    role: (participant.roles ?? []).join(" and ") || "participant",
+    name: participant.name,
+    lines
+  });
+  res.json({ ...briefing, summary: text, model, reason, cached: Boolean(cached) });
 });
 
 app.get("/api/stats", (_req, res) => {
@@ -458,6 +501,150 @@ app.get("/api/trace/:id", async (req, res) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Printed documents
+// ---------------------------------------------------------------------------
+
+const money = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const onDay = (seconds) =>
+  seconds ? new Date(Number(seconds) * 1000).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+
+/// ethers hands back a Result proxy, which throws on an out-of-range index
+/// rather than returning undefined — so the bounds are checked, not probed.
+function pick(list, index) {
+  return Number.isInteger(index) && index >= 0 && index < list.length ? list[index] : null;
+}
+
+const publicBase = (req) => process.env.TERRAVANE_PUBLIC_URL ?? `${req.protocol}://${req.get("host")}`;
+
+const traceQr = (url) => QRCode.toString(url, { type: "svg", margin: 0, errorCorrectionLevel: "M" });
+
+/// Send a filled template as a file rather than a page. `inline` in the query
+/// keeps it in the tab instead, which is what the console's preview link uses.
+function sendDocument(res, req, html, filename) {
+  const disposition = req.query.inline === undefined ? "attachment" : "inline";
+  res.type("text/html; charset=utf-8").set("Content-Disposition", `${disposition}; filename="${filename}"`).send(html);
+}
+
+/// The invoice for one settled handover. Only a countersigned deal has an
+/// invoice: an offer nobody accepted is not a sale, and printing one that looks
+/// like a sale would be the single most useful document to forge here.
+app.get("/api/batches/:id/invoice/:index", async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const index = Number(req.params.index);
+    const row = batchRow(id);
+    if (!row) return res.status(404).json({ error: "no such batch" });
+
+    const h = pick(await registry.getHandovers(id), index);
+    if (!h) return res.status(404).json({ error: "no such handover" });
+    if (!h.accepted) return res.status(409).json({ error: "this deal has not been countersigned; there is nothing to invoice" });
+
+    const terms = documents.get(h.termsHash)?.body ?? {};
+    const seller = who(h.from);
+    const buyer = who(h.to);
+    const quantity = Number(terms.quantity ?? row.quantity);
+    const price = Number(terms.pricePerUnit ?? 0);
+    const total = Number(terms.total ?? quantity * price);
+    const verifyUrl = `${publicBase(req)}/trace.html?id=${id}`;
+    const event = db
+      .prepare("SELECT block FROM events WHERE batch_id = ? AND name = 'TransferAccepted' ORDER BY block LIMIT 1 OFFSET ?")
+      .get(id, index);
+
+    const html = render("invoice", {
+      INVOICE_NUMBER: `TV-${String(id).padStart(6, "0")}-${String(index + 1).padStart(2, "0")}`,
+      ISSUED_ON: onDay(h.settledAt),
+      SETTLED_BLOCK: event?.block ?? "-",
+      LOT_ID: id,
+      SELLER_NAME: seller?.name ?? "Unknown",
+      SELLER_LOCATION: seller?.location ?? "",
+      SELLER_ADDRESS: h.from,
+      BUYER_NAME: buyer?.name ?? "Unknown",
+      BUYER_LOCATION: buyer?.location ?? "",
+      BUYER_ADDRESS: h.to,
+      PRODUCE: terms.produce || `${row.produce_type}${row.variety ? ` ${row.variety}` : ""}`,
+      ORIGIN_FARM: who(row.origin_farm)?.name ?? "-",
+      HARVESTED_ON: onDay(row.harvested_at),
+      QUANTITY: quantity.toLocaleString("en-IN"),
+      UNIT: terms.unit || row.unit,
+      PRICE_PER_UNIT: price ? money.format(price) : "-",
+      LINE_TOTAL: price ? money.format(total) : "-",
+      CURRENCY: terms.currency ?? "INR",
+      TOTAL: price ? money.format(total) : "No price agreed",
+      PAYMENT_TERMS: terms.paymentTerms || "Not stated",
+      DELIVER_BY: terms.deliverBy || "Not stated",
+      NOTE: h.note || terms.note || "-",
+      // A deal that took three rounds says something an invoice usually hides.
+      ROUNDS: Number(h.round) > 1 ? `Settled at round ${Number(h.round)} after ${Number(h.round) - 1} counter-offer${Number(h.round) > 2 ? "s" : ""}` : "Accepted as first offered",
+      TERMS_HASH: h.termsHash,
+      VERIFY_URL: verifyUrl,
+      OFFERED_ON: onDay(h.proposedAt),
+      AGREED_ON: onDay(h.settledAt),
+      QR_SVG: await traceQr(verifyUrl)
+    });
+
+    sendDocument(res, req, html, attachmentName("invoice", id, index));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/// The certificate for one certification on a lot. Revoked and expired ones
+/// still render — a certificate that quietly disappears when withdrawn is
+/// worse than one that prints the word VOID across itself.
+app.get("/api/batches/:id/certificate/:index", async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const index = Number(req.params.index);
+    const row = batchRow(id);
+    if (!row) return res.status(404).json({ error: "no such batch" });
+
+    const c = pick(await registry.getBatchCertifications(id), index);
+    if (!c) return res.status(404).json({ error: "no such certification" });
+
+    const expired = Number(c.expiresAt) !== 0 && Number(c.expiresAt) * 1000 <= Date.now();
+    const status = c.revoked ? `Revoked — ${c.revocationReason || "no reason recorded"}` : expired ? "Expired" : "In force";
+    const verifyUrl = `${publicBase(req)}/trace.html?id=${id}`;
+    const origin = who(row.origin_farm);
+
+    const html = render("certificate", {
+      CERT_NUMBER: `TV-C-${String(id).padStart(6, "0")}-${String(index + 1).padStart(2, "0")}`,
+      SCHEME: c.scheme,
+      STATUS: status,
+      STATUS_CLASS: c.revoked || expired ? "void" : "",
+      LOT_ID: id,
+      PRODUCE: `${row.produce_type}${row.variety ? ` ${row.variety}` : ""}`,
+      ORIGIN_FARM: origin?.name ?? "-",
+      ORIGIN_LOCATION: row.origin_location || "-",
+      HARVESTED_ON: onDay(row.harvested_at),
+      // A lot consumed by a split or a merge reads zero, and "0 kg certified"
+      // on a certificate looks like a broken document rather than a lot that
+      // has since become other lots. Say what actually happened to it.
+      QUANTITY: Number(row.quantity) > 0
+        ? `${Number(row.quantity).toLocaleString("en-IN")} ${row.unit}`
+        : (() => {
+            const children = JSON.parse(row.children || "[]");
+            return children.length
+              ? `Since divided into ${children.length} lots (${children.map((n) => `#${n}`).join(", ")})`
+              : "None remaining";
+          })(),
+      ISSUED_ON: onDay(c.issuedAt),
+      EXPIRES_ON: Number(c.expiresAt) === 0 ? "No expiry recorded" : onDay(c.expiresAt),
+      CERTIFIER_NAME: who(c.certifier)?.name ?? "Unknown certifier",
+      CERTIFIER_ADDRESS: c.certifier,
+      EVIDENCE_URI: c.evidenceURI || "None filed",
+      EVIDENCE_HASH: c.evidenceHash,
+      VERIFY_URL: verifyUrl,
+      QR_SVG: await traceQr(verifyUrl)
+    });
+
+    sendDocument(res, req, html, attachmentName("certificate", id, index));
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get("/api/qr/:id", async (req, res) => {
   const id = Number(req.params.id);
   const base = process.env.TERRAVANE_PUBLIC_URL ?? `${req.protocol}://${req.get("host")}`;
@@ -487,11 +674,64 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: err.message });
 });
 
+/// Is the contract this server is talking to the one this server was built
+/// against? A chain that persists across runs will happily hand back an older
+/// deployment, and the first symptom of that pairing is an unreadable decode
+/// error somewhere deep in a page. Said plainly at startup, it is a one-line fix.
+///
+/// Immutables are the wrinkle: `access` is written into the code at construction,
+/// so those byte ranges hold the registry address on chain and zeroes in the
+/// artifact. The compiler records exactly where they are, so both sides are
+/// blanked before the comparison rather than the comparison being abandoned.
+function maskImmutables(hex, references) {
+  const bytes = Buffer.from(hex.slice(2), "hex");
+  for (const spans of Object.values(references ?? {})) {
+    for (const { start, length } of spans) {
+      // The offsets belong to the artifact. Applied to some other contract's
+      // code they can run past its end, and an out-of-range fill throws — so
+      // they are clamped. A wrong contract is caught on length anyway, below.
+      bytes.fill(0, Math.min(start, bytes.length), Math.min(start + length, bytes.length));
+    }
+  }
+  return bytes.toString("hex");
+}
+
+async function checkDeployedCode() {
+  // Only the fetch may fail for reasons that are not this function's business;
+  // the comparison itself must never be swallowed, or a real mismatch reports
+  // as a clean bill of health.
+  let onChain;
+  try {
+    onChain = await prov.getCode(deployment.produceRegistry);
+  } catch {
+    return null; // the chain being unreachable is already reported elsewhere
+  }
+  if (onChain === "0x") return "no contract at the recorded address; run npm run deploy";
+
+  const artifact = loadArtifact("ProduceRegistry");
+  const drifted =
+    onChain.length !== artifact.deployedBytecode.length ||
+    maskImmutables(onChain, artifact.immutableReferences) !==
+      maskImmutables(artifact.deployedBytecode, artifact.immutableReferences);
+
+  return drifted ? "the deployed contract is not the one these sources compile to; run npm run deploy && npm run seed" : null;
+}
+
+let codeDrift = null;
+
 const server = app.listen(PORT, async () => {
   console.log(`terravane   http://localhost:${PORT}`);
   console.log(`rpc         ${RPC_URL}`);
   console.log(`registry    ${deployment.produceRegistry}`);
   console.log(`signing     ${signingEnabled() ? "enabled (local dev keys)" : "disabled"}`);
+  // Warmed here rather than on the first request, so health reports the real
+  // answer from the start instead of "not yet checked".
+  aiStatus({ force: true }).then((ai) =>
+    console.log(`summaries   ${ai.model ? `${ai.model} at ${ai.host}` : `off (${ai.reason})`}`)
+  );
+  codeDrift = await checkDeployedCode();
+  if (codeDrift) console.error(`\nCONTRACT MISMATCH: ${codeDrift}\n`);
+
   try {
     await indexer.start();
     console.log(`indexed     block ${getMeta(db, "lastBlock", "0")}, ${db.prepare("SELECT COUNT(*) AS n FROM events").get().n} events`);
