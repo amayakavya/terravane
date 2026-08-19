@@ -19,14 +19,21 @@ export function openDatabase(file = path.join(ROOT, "data", "index.db")) {
 /// here is derived, so a column that arrives empty fills itself on the next
 /// resync rather than needing a backfill.
 function migrate(db) {
-  const columns = new Set(db.prepare("PRAGMA table_info(batches)").all().map((c) => c.name));
-  const wanted = [
+  addColumns(db, "batches", [
     ["pending_awaiting", "TEXT"],
     ["pending_terms", "TEXT"],
     ["pending_round", "INTEGER"]
-  ];
+  ]);
+  addColumns(db, "participants", [
+    ["email", "TEXT"],
+    ["phone", "TEXT"]
+  ]);
+}
+
+function addColumns(db, table, wanted) {
+  const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
   for (const [name, decl] of wanted) {
-    if (!columns.has(name)) db.exec(`ALTER TABLE batches ADD COLUMN ${name} ${decl}`);
+    if (!columns.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${decl}`);
   }
 }
 
@@ -46,7 +53,11 @@ CREATE TABLE IF NOT EXISTS participants (
   roles      INTEGER,
   role_names TEXT,
   active     INTEGER,
-  registered_at INTEGER
+  registered_at INTEGER,
+  -- Self-declared, off-chain, editable only by the participant it belongs
+  -- to. The AccessRegistry contract knows nothing about either column.
+  email      TEXT,
+  phone      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS batches (

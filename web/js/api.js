@@ -23,6 +23,7 @@ export const api = {
   health: () => get("/api/health"),
   stats: () => get("/api/stats"),
   participants: () => get("/api/participants"),
+  setContact: (address, body) => post(`/api/participants/${address}/contact`, body),
 
   batches: (query = {}) => {
     const params = new URLSearchParams();
@@ -106,6 +107,22 @@ export const session = {
 export const CUSTODY_ROLES = ["farmer", "processor", "distributor", "retailer"];
 
 export const CERT_SCHEMES = ["NPOP Organic", "India Organic", "GlobalGAP", "Residue Free", "FSSAI Compliant", "Fair Trade Certified", "Rainforest Alliance"];
+
+/**
+ * Which i18n block explains each scheme, so a scheme name on a lot is readable
+ * by someone who has never heard of it — a shopper on the trace page most of
+ * all. The ledger records that a certifier attached the scheme; the copy under
+ * `scheme.<slug>.*` says what attaching it is a claim about.
+ */
+export const CERT_SCHEME_SLUGS = {
+  "NPOP Organic": "npop",
+  "India Organic": "indiaOrganic",
+  "GlobalGAP": "globalgap",
+  "Residue Free": "residueFree",
+  "FSSAI Compliant": "fssai",
+  "Fair Trade Certified": "fairTrade",
+  "Rainforest Alliance": "rainforest"
+};
 
 export const STAGE_KEYS = [
   "stage.harvested",

@@ -1,5 +1,7 @@
 import { allowedActions, api, CERT_SCHEMES, session, STAGE_KEYS } from "./api.js";
 import { add, ago, badge, button, card, cardHeader, clear, el, emptyState, field, icon, input, mount, notice, onDay, page, qty, renderShell, select, stageLabel, t, toast, when } from "./ui.js";
+import { certificationRow } from "./cert-detail.js";
+import { contactCard } from "./contact.js";
 import { figureBox, lineageGraph, temperatureChart } from "./charts.js";
 import { statTile } from "./lot-table.js";
 import { custodyStops, journeyMap, routeDistance } from "./map.js";
@@ -185,12 +187,13 @@ function routeStatusCard(route, b) {
 async function overview(body) {
   const b = dossier.batch;
   const attrs = dossier.attributes;
-  // Batch certifications carry their own printable certificate; farm-wide ones
-  // are held against the grower, not this lot, so they are listed but not
-  // issued from here.
+  // Batch certifications carry their own printable certificate and index into
+  // it; farm-wide ones are held against the grower, not this lot, so they get
+  // a scope tag (the explainer sheet says which) but no certificate of their
+  // own to print here.
   const certs = [
-    ...dossier.certifications.map((c, index) => ({ ...c, index })),
-    ...dossier.farmCertifications.map((c) => ({ ...c, index: null }))
+    ...dossier.certifications.map((c, index) => ({ cert: c, scope: "lot", index })),
+    ...dossier.farmCertifications.map((c) => ({ cert: c, scope: "farm", index: null }))
   ];
   // Whoever planned this route — usually the farmer who will never hold the
   // lot again after the first hop — otherwise has no way to see it move
@@ -226,20 +229,29 @@ async function overview(body) {
 
       el("div", { class: "grid gap-6" }, [
         card([
-          cardHeader(t("lot.certifications"), badge(String(certs.filter((c) => c.active).length), certs.some((c) => c.active) ? "good" : "neutral")),
+          cardHeader(t("lot.certifications"), badge(String(certs.filter(({ cert }) => cert.active).length), certs.some(({ cert }) => cert.active) ? "good" : "neutral")),
           certs.length
-            ? el("div", { class: "divide-y divide-outline-variant/40" }, certs.map((c) =>
-                el("div", { class: `px-6 py-3.5 ${c.active ? "" : "opacity-60"}` }, [
-                  el("div", { class: "flex items-center gap-2 flex-wrap" }, [
-                    el("p", { class: "font-body-md text-body-sm font-medium text-on-surface", text: c.scheme }),
-                    c.active ? null : badge(c.revoked ? t("act.cancel") : t("common.none"), "bad")
-                  ]),
-                  el("p", { class: "font-body-sm text-[12px] text-on-surface-variant", text: `${c.certifier?.name ?? "-"} · ${c.expiresAt ? onDay(c.expiresAt) : t("common.none")}` }),
-                  c.index === null ? null : documentLinks(t("doc.certificate"), api.certificateUrl(b.id, c.index))
+            ? el("div", { class: "divide-y divide-outline-variant/40" }, certs.map(({ cert: c, scope, index }) =>
+                // documentLinks renders anchors, which can't nest inside the
+                // button certificationRow wraps its children in — kept as a
+                // sibling below it rather than inside, so the row is still one
+                // clean click to the explainer and the certificate download
+                // doesn't also trigger it.
+                el("div", { class: c.active ? "" : "opacity-60" }, [
+                  certificationRow(c, [
+                    el("div", { class: "flex items-center gap-2 flex-wrap" }, [
+                      el("p", { class: "font-body-md text-body-sm font-medium text-on-surface", text: c.scheme }),
+                      c.active ? null : badge(c.revoked ? t("act.cancel") : t("common.none"), "bad"),
+                      el("span", { class: "ml-auto shrink-0 text-on-surface-variant/50", html: icon("info", { size: 15 }) })
+                    ]),
+                    el("p", { class: "font-body-sm text-[12px] text-on-surface-variant", text: `${c.certifier?.name ?? "-"} · ${c.expiresAt ? onDay(c.expiresAt) : t("common.none")}` })
+                  ], { scope, extra: "px-6 py-3.5" }),
+                  index === null ? null : el("div", { class: "px-6 pb-3.5 -mt-1" }, [documentLinks(t("doc.certificate"), api.certificateUrl(b.id, index))])
                 ])
               ))
             : emptyState(t("common.none"), "verified")
         ]),
+        contactCards(b),
         card([
           cardHeader(t("lot.inspections")),
           dossier.inspections.length
@@ -269,6 +281,27 @@ async function overview(body) {
       ])
     ])
   );
+}
+
+/**
+ * Who to ask when the ledger doesn't say enough — the origin farm always,
+ * and the current holder too when that's someone else, since a certifier
+ * weighing a lot at retail may need a question answered by whoever has it
+ * now rather than whoever grew it.
+ */
+function contactCards(b) {
+  const origin = b.origin.farm;
+  const custodian = b.custodian;
+  const samePart = origin && custodian && origin.address === custodian.address;
+  const rows = [
+    origin ? contactCard(origin, t("contact.origin")) : null,
+    !samePart && custodian ? contactCard(custodian, t("contact.custodian")) : null
+  ].filter(Boolean);
+  if (!rows.length) return null;
+  return card([
+    cardHeader(t("lot.contact")),
+    el("div", { class: "divide-y divide-outline-variant/40" }, rows.map((row) => el("div", { class: "px-6 py-4" }, [row])))
+  ]);
 }
 
 /** The off-chain attributes, and whether they still match what was committed. */
@@ -718,6 +751,7 @@ function routeSlab(b, route, mine) {
 
 async function actions(body) {
   const b = dossier.batch;
+  add(body, contactCards(b));
   const mine = b.custodian?.address?.toLowerCase() === me.address.toLowerCase();
   const roles = me.roles ?? [];
 

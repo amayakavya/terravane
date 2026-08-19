@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { ago, badge, button, card, cardHeader, clear, el, I18n, icon, input, logoMark, mount, notice, onDay, qty, stageLabel, t, when } from "./ui.js";
+import { certificationRow } from "./cert-detail.js";
 import { figureBox, lineageGraph, temperatureChart } from "./charts.js";
 import { statTile } from "./lot-table.js";
 import { custodyStops, journeyMap, routeDistance } from "./map.js";
@@ -262,13 +263,16 @@ function certificationsCard(data) {
   return card([
     cardHeader(t("trace.certsInForce"), badge(String(data.certifications.length), "good")),
     el("div", { class: "divide-y divide-outline-variant/50" }, data.certifications.map((c) =>
-      el("div", { class: "flex items-start gap-3 px-6 py-4" }, [
-        el("span", { class: "text-primary shrink-0 mt-0.5", html: icon("verified", { size: 18 }) }),
-        el("div", { class: "min-w-0" }, [
-          el("p", { class: "font-body-md text-body-sm text-on-surface", text: c.scheme }),
-          el("p", { class: "font-body-sm text-[12px] text-on-surface-variant", text: `${c.certifier?.name ?? "-"} · ${c.expiresAt ? onDay(c.expiresAt) : t("common.none")}` })
+      certificationRow(c, [
+        el("div", { class: "flex items-start gap-3" }, [
+          el("span", { class: "text-primary shrink-0 mt-0.5", html: icon("verified", { size: 18 }) }),
+          el("div", { class: "min-w-0" }, [
+            el("p", { class: "font-body-md text-body-sm text-on-surface", text: c.scheme }),
+            el("p", { class: "font-body-sm text-[12px] text-on-surface-variant", text: `${c.certifier?.name ?? "-"} · ${c.expiresAt ? onDay(c.expiresAt) : t("common.none")}` })
+          ]),
+          el("span", { class: "ml-auto shrink-0 text-on-surface-variant/50 mt-0.5", html: icon("info", { size: 15 }) })
         ])
-      ])
+      ], { scope: c.scope, extra: "px-6 py-4" })
     ))
   ], "rise-in-delay");
 }
