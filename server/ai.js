@@ -13,7 +13,40 @@
 // prose, so a sentence that disagrees with them is visibly wrong rather than
 // quietly believed.
 
-const HOST = process.env.TERRAVANE_AI_URL ?? "http://127.0.0.1:11434";
+/// Every node in this network runs its own model, if it runs one at all — the
+/// whole point of talking to a daemon on 127.0.0.1 rather than a vendor's API
+/// is that there is no key to share and nothing to send off this machine.
+/// These start from the environment a node was launched with, but any of the
+/// three can be overridden at runtime from the admin page, so a different
+/// person running this same codebase can point it at their own daemon without
+/// touching env vars or restarting the process.
+let overrides = { host: null, model: null, enabled: null };
+
+export function setAiConfig({ host, model, enabled } = {}) {
+  overrides = { host: host || null, model: model || null, enabled: enabled ?? null };
+  // A changed host or model invalidates whatever the last probe found; make
+  // the next status check look again instead of reporting stale news for up
+  // to PROBE_TTL_MS.
+  probe = { at: 0, model: null, reason: "not yet checked" };
+}
+
+/** What the admin page shows: the effective values right now, and where each one came from. */
+export function getAiConfig() {
+  return {
+    host: currentHost(),
+    hostIsOverride: overrides.host !== null,
+    envHost: process.env.TERRAVANE_AI_URL ?? null,
+    model: overrides.model ?? process.env.TERRAVANE_AI_MODEL ?? null,
+    modelIsOverride: overrides.model !== null,
+    envModel: process.env.TERRAVANE_AI_MODEL ?? null,
+    enabled: aiEnabled(),
+    enabledIsOverride: overrides.enabled !== null
+  };
+}
+
+function currentHost() {
+  return overrides.host ?? process.env.TERRAVANE_AI_URL ?? "http://127.0.0.1:11434";
+}
 
 /// Preference order among locally installed models. Smaller first: this is a
 /// three-sentence summary on a desk somebody is waiting to use, so latency
@@ -25,6 +58,7 @@ const PROBE_TTL_MS = 30000;
 const CACHE_TTL_MS = Number(process.env.TERRAVANE_AI_CACHE ?? 120000);
 
 export function aiEnabled() {
+  if (overrides.enabled !== null) return overrides.enabled;
   return process.env.TERRAVANE_AI !== "off";
 }
 
@@ -35,7 +69,7 @@ async function fetchJson(path, init = {}, timeoutMs = 2500) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${HOST}${path}`, { ...init, signal: controller.signal });
+    const res = await fetch(`${currentHost()}${path}`, { ...init, signal: controller.signal });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     return await res.json();
   } finally {
@@ -57,14 +91,14 @@ async function fetchJson(path, init = {}, timeoutMs = 2500) {
  * reporting status take the last known answer and let the refresh land behind.
  */
 export async function aiStatus({ force = false, wait = true } = {}) {
-  if (!aiEnabled()) return { enabled: false, model: null, host: HOST, reason: "switched off with TERRAVANE_AI=off" };
+  if (!aiEnabled()) return { enabled: false, model: null, host: currentHost(), reason: "switched off with TERRAVANE_AI=off" };
 
   const stale = force || Date.now() - probe.at >= PROBE_TTL_MS;
   if (stale) {
     probing = probing ?? refreshProbe().finally(() => (probing = null));
     if (wait) await probing;
   }
-  return { enabled: true, model: probe.model, host: HOST, reason: probe.reason };
+  return { enabled: true, model: probe.model, host: currentHost(), reason: probe.reason };
 }
 
 async function refreshProbe() {
@@ -74,7 +108,7 @@ async function refreshProbe() {
     if (!installed.length) {
       probe = { at: Date.now(), model: null, reason: "no models installed; try: ollama pull gemma2:2b" };
     } else {
-      const pinned = process.env.TERRAVANE_AI_MODEL;
+      const pinned = overrides.model ?? process.env.TERRAVANE_AI_MODEL;
       // A pinned model is used whether or not the tag list reports it — the
       // pin is an instruction, and failing loudly at generation time on a typo
       // is clearer than silently substituting something else.
@@ -82,7 +116,7 @@ async function refreshProbe() {
       probe = { at: Date.now(), model: chosen, reason: null };
     }
   } catch (err) {
-    probe = { at: Date.now(), model: null, reason: `no model daemon at ${HOST} (${err.name === "AbortError" ? "timed out" : err.message})` };
+    probe = { at: Date.now(), model: null, reason: `no model daemon at ${currentHost()} (${err.name === "AbortError" ? "timed out" : err.message})` };
   }
 }
 
@@ -130,7 +164,7 @@ export async function summariseDesk({ role, name, lines }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(`${HOST}/api/generate`, {
+    const res = await fetch(`${currentHost()}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

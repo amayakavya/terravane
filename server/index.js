@@ -3,13 +3,13 @@ import express from "express";
 import QRCode from "qrcode";
 import { contracts, loadArtifact, provider, readDeployment, ROOT, RPC_URL, STAGE_NAMES } from "../scripts/lib/chain.js";
 import { decodeGeohash } from "../scripts/lib/geohash.js";
-import { getMeta, getRoute, openDatabase } from "./db.js";
+import { getMeta, getRoute, openDatabase, setMeta } from "./db.js";
 import { Indexer } from "./indexer.js";
 import { mountActions, signingEnabled } from "./actions.js";
 import { DocumentStore, mountDocuments } from "./documents.js";
 import { attachmentName, render } from "./render.js";
 import { briefingLines, deskBriefing } from "./desk.js";
-import { aiEnabled, aiStatus, summariseDesk } from "./ai.js";
+import { aiEnabled, aiStatus, getAiConfig, setAiConfig, summariseDesk } from "./ai.js";
 
 const PORT = Number(process.env.PORT ?? 4300);
 const deployment = readDeployment();
@@ -19,6 +19,16 @@ const { registry } = contracts(prov, deployment);
 
 const documents = new DocumentStore(db);
 const indexer = new Indexer({ db, provider: prov, deployment });
+
+// Whatever an admin last saved from the settings page, applied before this
+// node answers its first request — otherwise every restart would quietly
+// fall back to the environment again and the saved choice would look like it
+// hadn't stuck.
+setAiConfig({
+  host: getMeta(db, "ai.host", null),
+  model: getMeta(db, "ai.model", null),
+  enabled: JSON.parse(getMeta(db, "ai.enabled", "null"))
+});
 
 const app = express();
 app.use(express.json({ limit: "256kb" }));
@@ -40,8 +50,11 @@ participants();
 function who(address) {
   if (!address || address === "0x0000000000000000000000000000000000000000") return null;
   const row = participantCache.get(address.toLowerCase()) ?? participants().find((p) => p.address.toLowerCase() === address.toLowerCase());
+  // role_names can briefly be null for a row the contact-seed step inserted
+  // ahead of the indexer's own pass, and — belt and braces — for any other
+  // row this server didn't fully populate itself.
   return row
-    ? { address: row.address, name: row.name, location: row.location, roles: row.role_names.split(",").filter(Boolean), active: !!row.active, lat: row.lat, lon: row.lon, email: row.email, phone: row.phone }
+    ? { address: row.address, name: row.name, location: row.location, roles: (row.role_names ?? "").split(",").filter(Boolean), active: !!row.active, lat: row.lat, lon: row.lon, email: row.email, phone: row.phone }
     : { address, name: null, location: null, roles: [], active: null, lat: null, lon: null, email: null, phone: null };
 }
 
@@ -330,7 +343,7 @@ app.get("/api/participants", (_req, res) => {
       address: p.address,
       name: p.name,
       location: p.location,
-      roles: p.role_names.split(",").filter(Boolean),
+      roles: (p.role_names ?? "").split(",").filter(Boolean),
       active: !!p.active,
       lat: p.lat,
       lon: p.lon,
@@ -363,6 +376,40 @@ app.post("/api/participants/:address/contact", (req, res) => {
   res.json({ ok: true, email, phone });
 });
 
+function requireAdmin(req, res) {
+  const participant = who(String(req.body.as ?? req.query.as ?? ""));
+  if (!participant?.roles?.includes("admin")) {
+    res.status(403).json({ error: "only an admin can do this" });
+    return null;
+  }
+  return participant;
+}
+
+// Which local model daemon this node talks to, if any — never a vendor key,
+// because the node never talks to anything off this machine. Reading this
+// needs no role: the console shows it on the desk briefing to everyone
+// already. Changing it is admin-only and takes effect immediately, no
+// restart, because the whole point is letting the person actually running
+// this checkout point it at whatever they have installed.
+app.get("/api/admin/ai-config", (_req, res) => {
+  res.json(getAiConfig());
+});
+
+app.post("/api/admin/ai-config", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  const host = (req.body.host ?? "").trim() || null;
+  const model = (req.body.model ?? "").trim() || null;
+  const enabled = req.body.enabled === null || req.body.enabled === undefined ? null : Boolean(req.body.enabled);
+
+  setMeta(db, "ai.host", host === null ? "" : host);
+  setMeta(db, "ai.model", model === null ? "" : model);
+  setMeta(db, "ai.enabled", JSON.stringify(enabled));
+  setAiConfig({ host, model, enabled });
+
+  res.json(getAiConfig());
+});
+
 app.get("/api/batches", (req, res) => {
   const clauses = [];
   const params = {};
@@ -393,7 +440,25 @@ app.get("/api/batches", (req, res) => {
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const limit = Math.min(Number(req.query.limit ?? 200), 1000);
   const rows = db.prepare(`SELECT * FROM batches ${where} ORDER BY id DESC LIMIT ${limit}`).all(params);
-  res.json(rows.map(shapeBatch));
+
+  // A lot's most recent event tells you whether its current custodian has
+  // actually done anything with it yet. If the last thing that happened was
+  // a custody acceptance, they haven't — every other event (a stage advance,
+  // a new offer, telemetry, a split) would itself be more recent. This is
+  // what lets a list of held lots say "just landed on you" without a
+  // separate read/seen table to maintain.
+  const ids = rows.map((r) => r.id);
+  const latestByBatch = ids.length
+    ? db
+        .prepare(`
+          SELECT batch_id, name FROM events
+          WHERE id IN (SELECT MAX(id) FROM events WHERE batch_id IN (${ids.map(() => "?").join(",")}) GROUP BY batch_id)
+        `)
+        .all(...ids)
+    : [];
+  const justAccepted = new Set(latestByBatch.filter((e) => e.name === "TransferAccepted").map((e) => e.batch_id));
+
+  res.json(rows.map((r) => ({ ...shapeBatch(r), justAccepted: justAccepted.has(r.id) })));
 });
 
 app.get("/api/batches/:id", async (req, res) => {

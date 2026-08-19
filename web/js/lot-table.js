@@ -44,8 +44,12 @@ function row(b, dense) {
     el("td", { class: pad }, stageBadge(b)),
     el("td", { class: `${pad} font-body-sm text-body-sm text-on-surface-variant` }, [
       el("span", { text: b.custodian?.name ?? "-" }),
+      // Whoever owes the next signature, not always the recipient — a
+      // countered offer leaves the original holder as pendingCustodian's
+      // counterpart still owing the next move, and naming the recipient
+      // there reads backwards.
       b.pendingCustodian
-        ? el("p", { class: "font-body-sm text-[11px] text-on-surface-variant/70", text: `${t("lot.pending")} ${b.pendingCustodian.name}` })
+        ? el("p", { class: "font-body-sm text-[11px] text-on-surface-variant/70", text: `${t("lot.pending")} ${(b.deal?.awaiting ?? b.pendingCustodian).name}` })
         : null
     ]),
     el("td", { class: pad }, el("div", { class: "flex flex-wrap gap-1.5 justify-end" }, lotFlags(b)))

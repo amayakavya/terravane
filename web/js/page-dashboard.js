@@ -88,10 +88,17 @@ async function main_() {
   const holdsCustody = roles.some((r) => CUSTODY_ROLES.includes(r));
 
   await page(main, async () => {
-    const [stats, heldAll, recentAll, participants] = await Promise.all([
+    const [stats, heldAll, recentAll, openDeals, participants] = await Promise.all([
       api.stats(),
       api.batches({ custodian: me.address, limit: 200 }),
       api.batches({ limit: holdsCustody ? 8 : 200 }),
+      // A lot mid-negotiation stays with its current custodian until both
+      // sides sign, so a farmer waiting on round 2 of their own offer is
+      // still its custodian, not its pendingCustodian — and the lot may not
+      // be among the 8 most recently touched globally. Fetching every open
+      // deal and filtering by who owes the next signature is the only way
+      // that farmer's turn actually surfaces.
+      api.batches({ flag: "open", limit: 200 }),
       api.participants()
     ]);
 
@@ -101,15 +108,11 @@ async function main_() {
     const held = heldAll.filter((b) => !isClosed(b));
     const inTransit = held.filter((b) => b.stage === 3).length;
     const attention = held.filter((b) => b.recalled || b.coldChainBreached || !b.custodyIntact).length;
-    const awaiting = recentAll.filter((b) => b.pendingCustodian?.address?.toLowerCase() === me.address.toLowerCase());
+    const awaiting = openDeals.filter((b) => b.deal?.awaiting?.address?.toLowerCase() === me.address.toLowerCase());
     const queue = holdsCustody ? null : workQueue(roles, recentAll);
 
     mount(main, 
       hero(me, { held: held.length, inTransit, attention }),
-
-      // Reads the desk's own figures and, where a local model is answering,
-      // says them back in a sentence. Draws itself in; nothing below waits on it.
-      briefingCard(me),
 
       awaiting.length
         ? card([
@@ -137,16 +140,25 @@ async function main_() {
               lotTable(held.slice(0, 8), { onEmpty: t("inv.empty"), dense: true })
             ], "rise-in"),
 
-        card([
-          cardHeader(t("net.title"), el("span", {
-            class: "font-label-sm text-[11px] tracking-widest uppercase text-on-surface-variant/70",
-            text: `${participants.length}`
-          })),
-          el("div", { class: "p-4" }, [
-            networkMap(participants, { width: 720, height: 460 }),
-            el("p", { class: "font-body-sm text-[12px] text-on-surface-variant/80 mt-3", text: t("net.caption") })
-          ])
-        ], "rise-in-delay")
+        el("div", { class: "grid gap-6 content-start" }, [
+          // Reads the desk's own figures and, where a local model is
+          // answering, says them back in a sentence. Draws itself in;
+          // nothing else waits on it. Lives beside the map rather than
+          // above everything, full width, the way it used to — seven
+          // facts stacked as rows there pushed the whole dashboard down
+          // before a reader reached anything they could act on.
+          briefingCard(me),
+          card([
+            cardHeader(t("net.title"), el("span", {
+              class: "font-label-sm text-[11px] tracking-widest uppercase text-on-surface-variant/70",
+              text: `${participants.length}`
+            })),
+            el("div", { class: "p-4" }, [
+              networkMap(participants, { width: 720, height: 460 }),
+              el("p", { class: "font-body-sm text-[12px] text-on-surface-variant/80 mt-3", text: t("net.caption") })
+            ])
+          ], "rise-in-delay")
+        ])
       ]),
 
       el("div", { class: "grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mt-6" }, [

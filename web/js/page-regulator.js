@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { card, cardHeader, el, mount, notice, page, renderShell, t } from "./ui.js";
+import { badge, button, card, cardHeader, el, field, input, mount, notice, page, renderShell, t, toast } from "./ui.js";
 import { lotTable, statTile } from "./lot-table.js";
 
 // The regulator's working surface: no single lot matters here, the network-wide
@@ -19,11 +19,12 @@ async function start() {
   }
 
   await page(main, async () => {
-    const [stats, recalled, breached, all] = await Promise.all([
+    const [stats, recalled, breached, all, aiConfig] = await Promise.all([
       api.stats(),
       api.batches({ flag: "recalled", limit: 100 }),
       api.batches({ flag: "breached", limit: 100 }),
-      api.batches({ limit: 1000 })
+      api.batches({ limit: 1000 }),
+      api.aiConfig()
     ]);
 
     const byRegion = groupByRegion(all);
@@ -46,12 +47,90 @@ async function start() {
         card([cardHeader(t("reg.breachByRegion")), regionTable(byRegion, "breaches")], "rise-in-delay")
       ]),
 
-      el("div", { class: "grid gap-6 lg:grid-cols-2" }, [
+      el("div", { class: "grid gap-6 lg:grid-cols-2 mb-6" }, [
         card([cardHeader(t("reg.recalledLots")), lotTable(recalled, { onEmpty: t("reg.noRecalls"), dense: true })], "rise-in"),
         card([cardHeader(t("reg.breachedLots")), lotTable(breached, { onEmpty: t("reg.noBreaches"), dense: true })], "rise-in-delay")
-      ])
+      ]),
+
+      aiConfigCard(me, aiConfig)
     );
   });
+}
+
+/**
+ * Which local model daemon this node talks to for the desk briefing's prose —
+ * never a vendor key, because nothing here ever leaves this machine. Whoever
+ * is actually running this checkout can point it at their own daemon and
+ * their own installed model, live, no restart: the friend who built this ran
+ * it on his machine against his own Ollama, and there was previously no way
+ * for anyone else running the same code to do the same on theirs without
+ * editing environment variables.
+ */
+function aiConfigCard(me, initial) {
+  const hostField = input({ type: "text", value: initial.host ?? "", placeholder: t("reg.aiHostPlaceholder") });
+  const modelField = input({ type: "text", value: initial.model ?? "", placeholder: t("reg.aiModelPlaceholder") });
+  const enabledBox = el("input", { type: "checkbox", class: "h-4 w-4 rounded border-outline-variant text-primary focus:ring-primary/30" });
+  enabledBox.checked = initial.enabled;
+
+  const status = el("p", { class: "font-body-sm text-[12px] text-on-surface-variant" });
+  const paintStatus = (cfg) => {
+    status.textContent = !cfg.enabled
+      ? t("reg.aiStatusOff", { reason: t("reg.aiSwitchedOff") })
+      : cfg.model
+        ? t("reg.aiStatusOn", { model: cfg.model })
+        : t("reg.aiStatusOff", { reason: cfg.reason ?? t("common.none") });
+  };
+  api.health().then((h) => paintStatus(h.ai ?? {})).catch(() => {});
+
+  const save = button(t("reg.aiSave"), {
+    onclick: async () => {
+      save.disabled = true;
+      try {
+        const result = await api.setAiConfig({
+          as: me.address,
+          host: hostField.value.trim(),
+          model: modelField.value.trim(),
+          enabled: enabledBox.checked
+        });
+        hostField.value = result.host ?? "";
+        toast(t("reg.aiSaved"));
+        setTimeout(() => api.health().then((h) => paintStatus(h.ai ?? {})).catch(() => {}), 400);
+      } catch (err) {
+        toast(err.message, "bad");
+      } finally {
+        save.disabled = false;
+      }
+    }
+  });
+
+  const reset = button(t("reg.aiReset"), {
+    tone: "quiet",
+    onclick: async () => {
+      const result = await api.setAiConfig({ as: me.address, host: "", model: "", enabled: null });
+      hostField.value = result.host ?? "";
+      modelField.value = "";
+      enabledBox.checked = result.enabled;
+      toast(t("reg.aiSaved"));
+      setTimeout(() => api.health().then((h) => paintStatus(h.ai ?? {})).catch(() => {}), 400);
+    }
+  });
+
+  return card([
+    cardHeader(t("reg.aiTitle"), badge(t("reg.aiLocalOnly"), "neutral")),
+    el("div", { class: "px-6 py-5 grid gap-5" }, [
+      el("p", { class: "font-body-md text-body-sm text-on-surface-variant max-w-2xl", text: t("reg.aiSubtitle") }),
+      el("div", { class: "grid gap-4 sm:grid-cols-2 max-w-2xl" }, [
+        field(t("reg.aiHost"), hostField),
+        field(t("reg.aiModel"), modelField)
+      ]),
+      el("label", { class: "flex items-center gap-2.5 cursor-pointer w-fit" }, [
+        enabledBox,
+        el("span", { class: "font-body-md text-body-sm text-on-surface", text: t("reg.aiEnabled") })
+      ]),
+      status,
+      el("div", { class: "flex items-center gap-3" }, [save, reset])
+    ])
+  ], "rise-in-delay");
 }
 
 /** Every lot bucketed by where it started, the unit a regulator actually reasons in. */

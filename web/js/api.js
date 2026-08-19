@@ -24,6 +24,8 @@ export const api = {
   stats: () => get("/api/stats"),
   participants: () => get("/api/participants"),
   setContact: (address, body) => post(`/api/participants/${address}/contact`, body),
+  aiConfig: () => get("/api/admin/ai-config"),
+  setAiConfig: (body) => post("/api/admin/ai-config", body),
 
   batches: (query = {}) => {
     const params = new URLSearchParams();

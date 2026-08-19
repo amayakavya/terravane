@@ -129,6 +129,13 @@ export function lotFlags(batch) {
   if (batch.stage === 6) out.push([t("stage.destroyed"), "bad"]);
   if (batch.coldChainBreached) out.push([t("flag.breached"), "warn"]);
   if (!batch.custodyIntact) out.push([t("flag.custodyGap"), "warn"]);
+  // The list endpoint sets this when the most recent thing that happened to
+  // the lot was a custody acceptance — the current holder hasn't advanced a
+  // stage, offered it onward, or otherwise touched it since it landed on
+  // them. Absent from the single-lot dossier response, so this only ever
+  // shows on a list of held lots, which is exactly where it's confusing to
+  // be silent about.
+  if (batch.justAccepted) out.push([t("flag.justAccepted"), "good"]);
   if (batch.counts?.failedInspections > 0) {
     const n = batch.counts.failedInspections;
     out.push([`${n} ${t(n === 1 ? "flag.failedCheck" : "flag.failedChecks")}`, "warn"]);

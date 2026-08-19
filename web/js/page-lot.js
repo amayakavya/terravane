@@ -214,7 +214,7 @@ async function overview(body) {
             [t("detail.harvestDate"), `${onDay(b.harvestedAt)} · ${ago(b.harvestedAt)}`],
             [t("detail.quantity"), qty(b.quantity, b.unit) + (Number(b.soldQuantity) ? ` · ${qty(b.soldQuantity, b.unit)} ${t("status.sold")}` : "")],
             [t("lot.custodian"), b.pendingCustodian
-              ? `${b.custodian?.name ?? "-"} · ${t("lot.pending")} ${b.pendingCustodian.name}`
+              ? `${b.custodian?.name ?? "-"} · ${t("lot.pending")} ${(b.deal?.awaiting ?? b.pendingCustodian).name}`
               : b.custodian?.name ?? "-"],
             [t("lot.coldChain"), b.coldChainRequired
               ? `${b.tempWindow[0]} to ${b.tempWindow[1]} °C · ${b.coldChainBreached ? t("flag.breached") : t("trace.verified")}`
@@ -251,7 +251,6 @@ async function overview(body) {
               ))
             : emptyState(t("common.none"), "verified")
         ]),
-        contactCards(b),
         card([
           cardHeader(t("lot.inspections")),
           dossier.inspections.length
@@ -267,6 +266,7 @@ async function overview(body) {
               ))
             : emptyState(t("common.none"), "fact_check")
         ]),
+        contactCards(b),
         dossier.recall
           ? card([
               cardHeader(t("lot.recall"), badge(`${t("act.severity")} ${dossier.recall.severity}`, "bad")),
@@ -751,7 +751,6 @@ function routeSlab(b, route, mine) {
 
 async function actions(body) {
   const b = dossier.batch;
-  add(body, contactCards(b));
   const mine = b.custodian?.address?.toLowerCase() === me.address.toLowerCase();
   const roles = me.roles ?? [];
 
@@ -784,6 +783,7 @@ async function actions(body) {
 
   if (!available.length) {
     add(body, card([cardHeader(t("lot.actions")), el("div", { class: "px-6 py-5" }, notice(t("act.noPermission")))]));
+    add(body, contactCards(b));
     return;
   }
 
@@ -876,7 +876,7 @@ async function actions(body) {
     }
   });
 
-  add(body, 
+  add(body,
     card([
       cardHeader(t("lot.actions"), badge(`${t("act.actingAs")}: ${me.name}`, "info")),
       el("div", { class: "px-6 py-5" }, [
@@ -888,6 +888,8 @@ async function actions(body) {
       ])
     ])
   );
+
+  add(body, contactCards(b));
 
   await paint();
 }
@@ -955,7 +957,17 @@ function control(name, kind, participants, batch) {
     const fallback = inAYear.toISOString().slice(0, 10);
     return input({ name, type: "date", min: today.toISOString().slice(0, 10), value: registered || fallback });
   }
-  return input({ name, type: kind === "number" ? "number" : "text", step: kind === "number" ? "any" : null });
+  // A handover's opening price defaults to what the farmer already registered
+  // for this lot, since that number exists and re-typing it invites a typo
+  // that reads as a different price than what was promised at harvest. It
+  // stays editable — a real negotiation can still open somewhere else.
+  const registeredPrice = name === "pricePerUnit" ? dossier?.attributes?.attributes?.pricePerUnit : null;
+  return input({
+    name,
+    type: kind === "number" ? "number" : "text",
+    step: kind === "number" ? "any" : null,
+    value: registeredPrice ?? null
+  });
 }
 
 void session;
